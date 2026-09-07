@@ -1,0 +1,9 @@
+venv/
+__pycache__/
+*.pyc
+skybridge.db
+backups/
+uploads/
+archivos_clientes/
+.streamlit/secrets.toml
+_seed_admin_once.py

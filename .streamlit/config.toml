@@ -1,0 +1,21 @@
+[theme]
+base = "light"
+primaryColor = "#E8652A"
+backgroundColor = "#F8FAFC"
+secondaryBackgroundColor = "#F1F5F9"
+textColor = "#0F172A"
+font = "sans serif"
+
+# Paleta oscura de marca: mismo naranja de acento, navy/slate en vez de
+# blanco. Se usa como fuente de verdad de colores para el toggle "Modo
+# oscuro" del sidebar (ver _inyectar_estilos en app.py) y también queda
+# disponible nativamente en el menú ☰ > Settings > Choose app theme.
+[theme.dark]
+primaryColor = "#E8652A"
+backgroundColor = "#0B1220"
+secondaryBackgroundColor = "#1E293B"
+textColor = "#E2E8F0"
+font = "sans serif"
+
+[browser]
+gatherUsageStats = false
