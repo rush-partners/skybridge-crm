@@ -313,19 +313,6 @@ __SB_VARS__
         }
         .sb-btn-link:hover { border-color: var(--sb-orange); color: var(--sb-orange) !important; }
 
-        /* "Ver detalle →" de una importación (mismo <a> de arriba, clase
-        extra): outline naranja como vercliente_/crmojo_, en vez del look
-        de botón secundario neutro por defecto de sb-btn-link. */
-        .sb-verdetalle-imp {
-            height: 42px; border-radius: 6px !important;
-            background: transparent !important; border: 1.5px solid var(--sb-orange) !important;
-            color: var(--sb-orange-dark) !important;
-        }
-        .sb-verdetalle-imp:hover {
-            background: var(--sb-orange) !important; border-color: var(--sb-orange) !important;
-            color: #fff !important;
-        }
-
         /* Fila de carga rápida de contactos (CRM): el botón "＋ Agregar" no
         tiene el renglón de label que sí reservan los text_input de al lado
         (aunque esté colapsado), así que sin este ajuste queda más alto y
@@ -693,6 +680,22 @@ __CRM_ETAPA_CSS__
         [class*="st-key-filacrmicons_"] {
             display: flex !important; flex-direction: row !important;
             align-items: center; gap: 6px;
+        }
+        /* El wrapper que Streamlit arma por cada st.markdown/st.button/
+        st.link_button (.stElementContainer) es el hijo real del flex de
+        arriba — antes solo se fijaba el tamaño del <a>/<button> de
+        adentro, y cada wrapper traía su propio ancho "de fábrica" distinto
+        (el de un link armado a mano con st.markdown mucho más ancho que el
+        de un ícono de Streamlit, y el de un ícono más angosto que su
+        propio botón de 34px) — con eso el gap de acá arriba terminaba
+        siendo cualquier cosa: un hueco enorme después de WhatsApp y los
+        otros 3 íconos superpuestos casi sin separación. Fijando el
+        wrapper mismo a 34×34 y centrando su contenido adentro, los 4
+        quedan del mismo tamaño real y el gap de 6px pasa a ser el mismo
+        entre todos. */
+        [class*="st-key-filacrmicons_"] .stElementContainer {
+            width: 34px !important; flex: 0 0 34px !important;
+            display: flex !important; align-items: center !important; justify-content: center !important;
         }
         [class*="st-key-filacrmicons_"] .stButton button,
         [class*="st-key-filacrmicons_"] .stLinkButton a,
@@ -1440,12 +1443,15 @@ def _render_contenido_importacion(imp, cotizaciones_cliente):
         # presentada") separados de los oficiales/definitivos. Ningún
         # archivo cambia de categoría ni se pierde acá, solo el agrupamiento
         # visual (ver _render_documentos_importacion / _categorias_provisorios_para).
-        st.markdown("#### 📝 Provisorios")
-        _render_documentos_importacion(imp["id"], _categorias_provisorios_para(imp["id"]))
+        # Cada uno en su propio desplegable (antes quedaban los dos siempre
+        # abiertos, uno debajo del otro, con su propia tira de sub-tabs) —
+        # así se puede abrir solo el que hace falta mirar en vez de tener
+        # que scrollear el grupo entero para llegar al otro.
+        with st.expander("📝 Provisorios", expanded=False):
+            _render_documentos_importacion(imp["id"], _categorias_provisorios_para(imp["id"]))
 
-        st.divider()
-        st.markdown("#### ✅ Oficiales")
-        _render_documentos_importacion(imp["id"], DOC_CATEGORIAS_OFICIALES)
+        with st.expander("✅ Oficiales", expanded=False):
+            _render_documentos_importacion(imp["id"], DOC_CATEGORIAS_OFICIALES)
 
     with tab_facturas:
         st.markdown("#### 🧾 Facturas")
@@ -1479,18 +1485,22 @@ def _render_fila_importacion_cliente(imp):
         c3.markdown(
             _badge_estado_importacion(imp.get("estado") or ESTADOS_IMPORTACION[0]), unsafe_allow_html=True,
         )
-        # Link real armado a mano (target="_self", no target="_blank" fijo
-        # de st.link_button) en vez de un st.button con on_click: navega
-        # por query params, así arranca una sesión de Streamlit nueva de
-        # punta a punta — main() lee cliente_ver/imp_ver al arrancar y
-        # reconstruye el estado (ficha de cliente abierta en su
-        # importación) antes de dibujar nada.
-        c4.markdown(
-            _link_button_html(
-                "Ver detalle →", f"?cliente_ver={imp['cliente_id']}&imp_ver={imp['id']}",
-            ).replace('class="sb-btn-link"', 'class="sb-btn-link sb-verdetalle-imp"'),
-            unsafe_allow_html=True,
-        )
+        # Antes era un <a href="?cliente_ver=...&imp_ver=..."> real (navegación
+        # dura del navegador) para esquivar un bug de reconciliación de tabs
+        # de React — pero una navegación dura arranca una sesión de Streamlit
+        # nueva de punta a punta, y con eso se perdía el login (session_state
+        # vive solo en memoria del servidor). El motivo real de aquel bug era
+        # que el swap pasaba DENTRO de vista_clientes(), compitiendo en la
+        # misma posición del árbol con el st.tabs() de _render_ficha_cliente
+        # — main() ya resuelve importacion_seleccionada_cliente ANTES de
+        # llamar a vista_clientes() (ver el comentario grande en main()), así
+        # que un st.button con rerun común, exactamente igual al de "Ver
+        # detalle →" en Panel de Control (que nunca tuvo este problema), cae
+        # en una posición del árbol totalmente distinta y no lo reproduce
+        # (confirmado con una réplica del árbol de tabs real, ida y vuelta).
+        if c4.button("Ver detalle →", key=f"verdetimp_{imp['id']}", use_container_width=True):
+            st.session_state.importacion_seleccionada_cliente = imp["id"]
+            st.rerun()
 
 
 def _render_ficha_importacion_cliente(imp):
