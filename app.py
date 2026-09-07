@@ -2785,43 +2785,43 @@ def _render_panel_importaciones():
     clientes_con_imp = sorted({i["cliente_nombre"] for i in imps_todas if i.get("cliente_nombre")})
     productos_con_imp = sorted({i["producto"] for i in imps_todas if i.get("producto")})
 
-    # Antes "cliente" y "producto" se buscaban juntos, a los ponchazos, en
-    # el mismo texto libre que "número" — un cliente con un nombre parecido
-    # a un producto (o viceversa) daba falsos positivos, y no había forma
-    # de filtrar por cliente/producto exactos sin escribir el nombre
-    # completo. Ahora cada uno tiene su propio selectbox (el combobox de
-    # Streamlit ya deja escribir para filtrar las opciones, así que sigue
-    # siendo "buscar y que se despliegue", pero sobre valores reales de la
-    # base en vez de texto libre) y el rango de ETA pasa a un solo campo de
-    # rango en vez de 2 date_input separados — mismo patrón que "Rango de
-    # fechas" en Filtros avanzados del Cotizador. Todo en un solo renglón,
-    # agrupado en la misma card "formrow_" que el resto de los buscadores.
+    # Cliente y Producto: sin "Todos" como opción de texto — el cuadro
+    # arranca vacío (index=None + placeholder) mostrando TODOS los
+    # resultados por default, listo para tipear y filtrar las opciones del
+    # desplegable en vivo (mismo combobox nativo de Streamlit, ya se
+    # comporta así). Sin "Número" (no lo habían pedido) y con el rango de
+    # ETA en un solo campo — mismo patrón que "Rango de fechas" en Filtros
+    # avanzados del Cotizador — quedan 5 controles con más aire cada uno:
+    # a 6 (con "Número" incluido) se apretaban tanto que el texto de las
+    # fechas y el de "Ocultar entregadas" se cortaban en pantallas no tan
+    # anchas. Todo en un solo renglón, agrupado en la misma card "formrow_"
+    # que el resto de los buscadores.
     with st.container(border=True, key="formrow_panel_filtros_imp"):
-        c1, c2, c3, c4, c5, c6 = st.columns(
-            [1.3, 1.5, 1.5, 1.7, 1.5, 1.2], vertical_alignment="bottom",
+        c1, c2, c3, c4, c5 = st.columns(
+            [1.6, 1.6, 2.3, 1.5, 1.5], vertical_alignment="bottom",
         )
-        numero_filtro = c1.text_input(
-            "🔎 Número", key="panel_busqueda_imp", placeholder="Buscar por número...",
+        cliente_filtro = c1.selectbox(
+            "Cliente", clientes_con_imp, index=None, placeholder="Todos los clientes",
+            key="panel_filtro_cliente_imp",
         )
-        cliente_filtro = c2.selectbox("Cliente", ["Todos"] + clientes_con_imp, key="panel_filtro_cliente_imp")
-        producto_filtro = c3.selectbox("Producto", ["Todos"] + productos_con_imp, key="panel_filtro_producto_imp")
-        rango_eta = c4.date_input(
+        producto_filtro = c2.selectbox(
+            "Producto", productos_con_imp, index=None, placeholder="Todos los productos",
+            key="panel_filtro_producto_imp",
+        )
+        rango_eta = c3.date_input(
             "Rango ETA", value=(), format="DD/MM/YYYY", key="panel_filtro_eta_rango",
         )
-        tipo_filtro = c5.selectbox("Tipo de envío", ["Todos"] + TIPOS_ENVIO, key="panel_filtro_tipo_imp")
-        ocultar_entregadas = c6.checkbox("Ocultar entregadas", key="panel_ocultar_entregadas")
+        tipo_filtro = c4.selectbox("Tipo de envío", ["Todos"] + TIPOS_ENVIO, key="panel_filtro_tipo_imp")
+        ocultar_entregadas = c5.checkbox("Ocultar entregadas", key="panel_ocultar_entregadas")
 
     fecha_desde = fecha_hasta = None
     if isinstance(rango_eta, (tuple, list)) and len(rango_eta) == 2:
         fecha_desde, fecha_hasta = rango_eta
 
     imps = imps_todas
-    if numero_filtro:
-        b = numero_filtro.strip().lower()
-        imps = [i for i in imps if b in (i.get("numero") or "").lower()]
-    if cliente_filtro != "Todos":
+    if cliente_filtro:
         imps = [i for i in imps if i.get("cliente_nombre") == cliente_filtro]
-    if producto_filtro != "Todos":
+    if producto_filtro:
         imps = [i for i in imps if i.get("producto") == producto_filtro]
     if tipo_filtro != "Todos":
         imps = [i for i in imps if i.get("tipo_envio") == tipo_filtro]
