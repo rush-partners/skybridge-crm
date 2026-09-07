@@ -20,16 +20,35 @@ import turso_serverless
 
 
 def _instalar_keepalive_turso():
-    """turso_serverless.Session._post (la librería instalada, único release
-    disponible: 0.1.0) abre una conexión TCP+TLS NUEVA en cada consulta HTTP
-    (usa urllib.request.urlopen, que no reutiliza sockets) — aunque
-    get_connection() ya reutiliza el objeto de sesión por hilo, cada
-    SELECT/INSERT individual seguía pagando un handshake completo contra
-    Turso (~1-3s cada uno, medido), y una pantalla con 5-10 consultas se
-    sentía inusable (20-30s). Este parche reemplaza el transporte por una
-    conexión HTTP keep-alive por sesión, reconectando sola si el socket se
-    cae. No se edita site-packages directamente porque se pisa en cada
-    `pip install -r requirements.txt`."""
+    """turso_serverless.Session (la librería instalada, único release
+    disponible: 0.1.0) tiene dos problemas de rendimiento/robustez que se
+    parchean acá porque no hay forma de arreglarlos sin editar
+    site-packages (que se pisa en cada `pip install -r requirements.txt`):
+
+    1. _post abre una conexión TCP+TLS NUEVA en cada consulta HTTP (usa
+       urllib.request.urlopen, que no reutiliza sockets) — cada
+       SELECT/INSERT individual pagaba un handshake completo contra Turso
+       (~1-3s cada uno, medido), y una pantalla con 5-10 consultas se
+       sentía inusable (20-30s). Se reemplaza el transporte por una
+       conexión HTTP keep-alive guardada en la sesión, reconectando sola
+       si el socket se cae.
+
+    2. Streamlit no cancela un rerun en curso al instante: si el usuario
+       interactúa de nuevo mientras el script anterior todavía está
+       terminando, los dos hilos corren un rato en simultáneo — y como
+       get_connection() guarda UNA sesión por sesión de navegador (no por
+       hilo, justamente para que sobreviva entre reruns), ambos hilos
+       pueden terminar usando la MISMA sesión (mismo socket HTTP y mismo
+       "baton", el token de continuidad del stream de libSQL) al mismo
+       tiempo. Sin serializar, eso rompe de dos formas: el socket
+       reventaba con "ResponseNotReady", y aun arreglando eso, dos
+       pedidos que leen el mismo baton antes de que el primero lo
+       actualice hacen que el servidor rechace el segundo con
+       "generation mismatch". Por eso el lock (RLock: execute_stmt y
+       execute_pipeline pueden llamarse entre sí en el mismo hilo, ej. en
+       _refresh_autocommit) envuelve el método entero — desde que se lee
+       el baton hasta que se actualiza con la respuesta — y no sólo la
+       llamada HTTP."""
     from turso_serverless.session import Session, ProtocolError
 
     def _post_keepalive(self, path, body):
@@ -85,6 +104,19 @@ def _instalar_keepalive_turso():
         return crudo
 
     Session._post = _post_keepalive
+
+    def _con_lock(metodo_original):
+        def envoltorio(self, *args, **kwargs):
+            lock = getattr(self, "_stream_lock", None)
+            if lock is None:
+                lock = threading.RLock()
+                self._stream_lock = lock
+            with lock:
+                return metodo_original(self, *args, **kwargs)
+        return envoltorio
+
+    Session.execute_stmt = _con_lock(Session.execute_stmt)
+    Session.execute_pipeline = _con_lock(Session.execute_pipeline)
 
 
 _instalar_keepalive_turso()
@@ -309,7 +341,7 @@ DEFAULT_GASTOS = [
 ]
 
 
-_local = threading.local()
+_TIMEOUT_LOCK_CONEXION = 15
 
 
 def get_connection():
@@ -318,19 +350,43 @@ def get_connection():
     viaje de red (ida y vuelta a Virginia) por cada una, y una pantalla que
     antes hacía 5-10 consultas locales instantáneas ahora se sentía lenta.
     Para no tener que tocar las ~30 funciones de abajo, get_connection()
-    guarda UNA conexión por hilo (threading.local — cada usuario conectado a
-    la vez corre en su propio hilo dentro de Streamlit, así que no se
-    comparte entre usuarios) y la reutiliza en cada llamada dentro de esa
-    sesión; conn.close() queda anulado (no-op) así el código existente no se
-    entera del cambio. Con esto, sólo la primera consulta de cada sesión
-    paga el viaje de red de abrir conexión — el resto son mucho más rápidas."""
-    conn = getattr(_local, "conn", None)
+    guarda UNA conexión en st.session_state (NO en threading.local: Streamlit
+    corre cada rerun del script — cada click, cada tecla — en un hilo
+    NUEVO, así que threading.local no sobrevive entre interacciones y
+    terminaba abriendo una conexión distinta en cada una, sin ninguna
+    mejora real; st.session_state en cambio persiste mientras dure la
+    sesión del navegador, que es la unidad correcta acá) y la reutiliza en
+    cada llamada dentro de esa sesión. Con esto, sólo la primera consulta de
+    toda la sesión del usuario paga el viaje de red de abrir conexión — el
+    resto son mucho más rápidas, incluso cambiando de pantalla.
+
+    Como Streamlit puede solapar dos reruns (uno terminando justo cuando el
+    siguiente ya arrancó — típico de un doble click en "Guardar"), y ambos
+    comparten esta misma conexión, una función de varias sentencias (ej.
+    save_cotizacion: UPDATE + varios INSERT + commit) puede quedar a medio
+    terminar cuando la OTRA corrida mete su propia sentencia en el medio —
+    eso rompe la transacción ("cannot start/commit a transaction..."). Por
+    eso conn.close() (que cada función de abajo ya llama al final, sea
+    lectura o escritura) queda pisado para liberar un lock que get_connection()
+    toma ACÁ, antes de devolver la conexión: así cada función de este
+    archivo pasa a ser, sin tocarla, una sección crítica completa. Si algo
+    corta una función a mitad de camino sin llegar a su conn.close() (una
+    excepción no atrapada), el lock quedaría trabado para siempre — por
+    eso el acquire tiene timeout: pasados _TIMEOUT_LOCK_CONEXION segundos
+    sin poder tomarlo, se abandona esa conexión y se abre una nueva en vez
+    de dejar la sesión colgada."""
+    conn = st.session_state.get("_db_conn")
+    if conn is not None:
+        if not conn._sb_lock.acquire(timeout=_TIMEOUT_LOCK_CONEXION):
+            conn = None
     if conn is None:
         conn = turso_serverless.connect(TURSO_DATABASE_URL, auth_token=TURSO_AUTH_TOKEN)
         conn.row_factory = turso_serverless.Row
+        conn._sb_lock = threading.RLock()
+        conn._sb_lock.acquire()
+        conn.close = conn._sb_lock.release
         conn.execute("PRAGMA foreign_keys = ON")
-        conn.close = lambda: None
-        _local.conn = conn
+        st.session_state["_db_conn"] = conn
     return conn
 
 

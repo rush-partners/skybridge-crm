@@ -23,7 +23,16 @@ import storage
 from pdf_export import generar_pdf_cotizacion
 
 st.set_page_config(page_title="Skybridge ERP/CRM", page_icon="🚢", layout="wide")
-db.init_db()
+if "_db_inicializada" not in st.session_state:
+    # Antes corría en CADA rerun (cada click, cada tecla) — con Turso
+    # comparte una sola conexión con estado de transacción por sesión
+    # (ver db.get_connection), así que si dos reruns se solapaban (típico
+    # con clicks rápidos), sus sentencias de init_db() se entrelazaban en
+    # la misma transacción y tiraban "cannot start a transaction within a
+    # transaction". Al ejecutarlo una sola vez por sesión de navegador se
+    # elimina la fuente más frecuente de ese solape.
+    db.init_db()
+    st.session_state["_db_inicializada"] = True
 
 # Paleta e identidad tomadas de skybridgecomex.com: navy oscuro + acento
 # naranja, tipografía Inter, botones rectos (radio 4px) en mayúscula.
