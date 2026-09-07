@@ -83,6 +83,14 @@ __SB_VARS__
 
         html, body, [class*="css"] { font-family: 'Inter', system-ui, sans-serif !important; }
 
+        /* Streamlit deja ~6rem de aire arriba de CADA página por defecto —
+        pensado para dejar lugar a un título grande, pero de sobra para el
+        resto de las pantallas (y clave en el login: sumado al margin-top
+        de .sb-login-logo de más abajo, tapaba el botón "Ingresar" y obligaba
+        a scrollear en una pantalla que solo tiene 2 campos). Se achica una
+        sola vez acá para toda la app. */
+        .block-container { padding-top: 2.5rem !important; }
+
         /* ---- Chrome nativo de Streamlit: fondo de la app, sidebar, header,
         inputs, tabs, expanders, etc. — todo referenciando los mismos
         tokens de arriba, así responde solo al cambiar de modo. Sin esto el
@@ -162,6 +170,71 @@ __SB_VARS__
         [data-testid="stFileUploaderDropzone"] {
             background: var(--sb-zone) !important; border-color: var(--sb-border) !important;
         }
+        /* Streamlit no tiene forma de localizar el texto nativo del
+        uploader ("Upload" / "200MB per file") desde Python — queda fijo en
+        inglés siempre, en las 5+ secciones de Documentación de la app.
+        Se ocultan esos 2 textos (font-size: 0) y se reemplazan con ::after
+        en español, mismo tamaño/línea que el original (14px/22.4px,
+        verificado con el DOM real del uploader) para que no se note el
+        cambio de tipografía. Selectores acotados dentro de
+        stFileUploaderDropzone para no tocar otros botones "secondary" de
+        la app. El texto de "200MB por archivo" queda genérico (sin listar
+        los tipos de archivo aceptados) porque esa parte del texto original
+        varía según el uploader — más seguro que armar la lista a mano acá
+        y que se desincronice si el accept= cambia en Python. */
+        [data-testid="stFileUploaderDropzone"] [data-testid="stBaseButton-secondary"] [data-testid="stMarkdownContainer"] p {
+            font-size: 0;
+        }
+        [data-testid="stFileUploaderDropzone"] [data-testid="stBaseButton-secondary"] [data-testid="stMarkdownContainer"] p::after {
+            content: "Subir archivo"; font-size: 14px; line-height: 22.4px;
+        }
+        [data-testid="stFileUploaderDropzoneInstructions"] span {
+            font-size: 0;
+        }
+        [data-testid="stFileUploaderDropzoneInstructions"] span::after {
+            content: "Máximo 200MB por archivo"; font-size: 14px; line-height: 22.4px;
+        }
+
+        /* Menú de navegación del sidebar (Panel de Control/Clientes/
+        Cotizador/CRM): antes era un st.radio sin estilo propio, con los
+        círculos nativos del navegador uno debajo del otro — se lo lleva al
+        lenguaje visual de menú real: ítems de ancho completo, el activo
+        resaltado con fondo propio + el mismo borde izquierdo naranja que
+        usan el resto de las "cards hoja" de la app (cardwrap_/clientecard_/
+        formrow_/cotfila_), sin el bullet del radio (ya no hace falta,
+        el resaltado cumple esa función). El label "Navegación" se oculta
+        (arriba del propio menú, con el wordmark SKYBRIDGE ya puesto, era
+        redundante) pero queda en el DOM: stRadioGroup ya trae su propio
+        aria-label="Navegación" para lectores de pantalla, así que ocultarlo
+        visualmente no rompe accesibilidad. Verificado contra el DOM real
+        del widget (data-testid, no clases de emotion, que cambian entre
+        builds) para que sobreviva updates de Streamlit. */
+        [data-testid="stSidebar"] [data-testid="stRadio"] > label {
+            display: none;
+        }
+        [data-testid="stSidebar"] [data-testid="stRadioGroup"] {
+            gap: 2px;
+        }
+        [data-testid="stSidebar"] [data-testid="stRadioOption"] {
+            width: 100%; padding: 10px 12px; border-radius: 6px;
+            border-left: 3px solid transparent;
+            transition: background 0.15s ease, border-color 0.15s ease;
+        }
+        [data-testid="stSidebar"] [data-testid="stRadioOption"]:hover {
+            background: var(--sb-surface);
+        }
+        [data-testid="stSidebar"] [data-testid="stRadioOption"][data-selected="true"] {
+            background: var(--sb-surface); border-left-color: var(--sb-orange);
+        }
+        [data-testid="stSidebar"] [data-testid="stRadioOption"][data-selected="true"] [data-testid="stMarkdownContainer"] p {
+            color: var(--sb-orange-dark) !important; font-weight: 700;
+        }
+        [data-testid="stSidebar"] [data-testid="stRadioOption"] [data-testid="stMarkdownContainer"] p {
+            font-size: 14px; margin: 0;
+        }
+        [data-testid="stSidebar"] [data-testid="stRadioOption"] > div > div > div:has(+ [data-testid="stMarkdownContainer"]) {
+            display: none;
+        }
 
         /* NOTA: st.dataframe (Glide Data Grid) se renderiza en <canvas> y
         toma sus colores del theme activo de Streamlit del lado del
@@ -191,8 +264,17 @@ __SB_VARS__
             padding-bottom: 0.35rem;
         }
 
-        /* Botones: mayúsculas + tracking, como los CTA del sitio */
-        .stButton > button, .stFormSubmitButton > button, .stDownloadButton > button {
+        /* Botones: mayúsculas + tracking, como los CTA del sitio.
+        Selector DESCENDIENTE (" button", no "> button" de hijo directo):
+        un st.button con help="..." hace que Streamlit meta el <button> real
+        adentro de un wrapper .stTooltipHoverTarget/.stTooltipIcon extra —
+        con ">" ese botón dejaba de matchear (ya no es hijo DIRECTO de
+        .stButton) y se quedaba sin mayúscula ni tracking, aunque el botón
+        de al lado (sin help=) sí los tuviera — se notaba en el CRM,
+        "Cotizar"/"Descartado" (con help=) al lado de "Ver ficha →" (sin
+        help=) en mayúscula. Afecta a las 8 reglas de .stButton/
+        .stFormSubmitButton/.stDownloadButton de esta hoja de estilos. */
+        .stButton button, .stFormSubmitButton button, .stDownloadButton button {
             text-transform: uppercase; letter-spacing: 0.08em;
             font-weight: 700; font-size: 12.5px; border-radius: 4px !important;
         }
@@ -250,7 +332,7 @@ __SB_VARS__
         partido en 2 líneas si la columna es angosta — con nowrap se
         mantiene en una sola línea y con align-self se nivela con la altura
         real de los inputs vecinos en vez de estirarse. */
-        [class*="st-key-formrow_crm_carga_rapida"] .stFormSubmitButton > button {
+        [class*="st-key-formrow_crm_carga_rapida"] .stFormSubmitButton button {
             white-space: nowrap;
         }
         [class*="st-key-formrow_crm_carga_rapida"] .stFormSubmitButton {
@@ -259,7 +341,7 @@ __SB_VARS__
         /* Fila de contacto en la lista del CRM: mismo motivo que arriba —
         que "VER FICHA →" no se parta en 2 líneas si la columna queda algo
         angosta en pantallas más chicas. */
-        [class*="st-key-contactcard_"] .stButton > button {
+        [class*="st-key-contactcard_"] .stButton button {
             white-space: nowrap;
         }
 
@@ -316,7 +398,7 @@ __SB_VARS__
         /* Botones de acción rápida del header: compactos pero con presencia
         real (no el CTA de altura fija por defecto de Streamlit, tampoco la
         versión demasiado chica de 34px probada antes). */
-        [class*="st-key-fichahdr_"] .stButton > button {
+        [class*="st-key-fichahdr_"] .stButton button {
             height: 40px; min-height: 40px; padding: 0 18px; font-size: 12px;
         }
 
@@ -392,7 +474,7 @@ __SB_VARS__
         primaryColor del theme en claro/oscuro sin CSS propio) y "Ver ficha"
         pasa de gris plano a un outline naranja con hover relleno, para que
         haya jerarquía real entre ambos en vez de dos botones grises iguales. */
-        [class*="st-key-clientecard_"] .stButton > button {
+        [class*="st-key-clientecard_"] .stButton button {
             height: 42px !important;
             border-radius: 6px !important;
             transition: background 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
@@ -651,34 +733,39 @@ __CRM_ETAPA_CSS__
         [class*="st-key-cardwrap_"] .stButton {
             display: flex; justify-content: flex-start; margin: 4px 0 0 0;
         }
-        [class*="st-key-cardwrap_"] .stButton > button {
+        [class*="st-key-cardwrap_"] .stButton button {
             all: unset !important; cursor: pointer; box-sizing: border-box;
             padding: 1px 2px; margin: 0; font-size: 12px; line-height: 1.45;
             font-weight: 600; font-family: inherit; letter-spacing: normal;
             text-transform: none; border-radius: 4px; text-align: center;
             color: var(--sb-orange-dark); white-space: nowrap; display: block;
         }
-        [class*="st-key-cardwrap_"] .stButton > button p {
+        [class*="st-key-cardwrap_"] .stButton button p {
             font-size: 12px; line-height: 1.45; white-space: nowrap; margin: 0;
         }
-        [class*="st-key-cardwrap_"] .stButton > button:hover {
+        [class*="st-key-cardwrap_"] .stButton button:hover {
             text-decoration: underline;
         }
 
         .sb-login-logo {
             font-size: 26px; font-weight: 800; letter-spacing: 0.18em;
             text-transform: uppercase; color: var(--sb-navy); text-align: center;
-            margin-top: 8vh; margin-bottom: 2px;
+            /* Antes 8vh: sumado al padding-top del .block-container de arriba
+            y al padding de la card de más abajo, el login (solo 2 campos y un
+            botón) no entraba en una pantalla estándar sin scrollear. Con el
+            .block-container ya achicado, esto alcanza para centrar el login
+            sin quedar pegado arriba. */
+            margin-top: 4vh; margin-bottom: 2px;
         }
         .sb-login-logo span { color: var(--sb-orange); }
         .sb-login-tagline {
             font-size: 11.5px; font-weight: 500; letter-spacing: 0.1em;
             text-transform: uppercase; color: var(--sb-text-secondary);
-            text-align: center; margin-bottom: 1.75rem;
+            text-align: center; margin-bottom: 1.25rem;
         }
         [class*="st-key-sb_login_card"] {
             background: var(--sb-surface); border: 1px solid var(--sb-border);
-            border-radius: 10px; padding: 1.75rem 2rem 1rem;
+            border-radius: 10px; padding: 1.5rem 2rem 0.75rem;
             box-shadow: 0 4px 24px rgba(15, 23, 42, 0.10), 0 1px 3px rgba(15, 23, 42, 0.06);
             border-top: 4px solid var(--sb-orange);
         }
@@ -769,11 +856,16 @@ def _link_button_html(label, href, target="_self", title=None):
 def _card_info_html(titulo, lineas):
     """HTML compacto (título + líneas) para el texto de una card del Panel de
     Control: todo en un solo bloque, para no acumular el margen que deja
-    Streamlit entre cada markdown/caption suelto."""
+    Streamlit entre cada markdown/caption suelto. .sb-card-line trunca con
+    "..." (white-space: nowrap + text-overflow: ellipsis) para que la card
+    no crezca con nombres/productos largos — se repite el texto en title=
+    para que al pasar el mouse se pueda leer completo en vez de quedar
+    cortado sin forma de verlo."""
     partes = [f'<div class="sb-card-title">{html.escape(str(titulo))}</div>']
     for linea in lineas:
         if linea:
-            partes.append(f'<div class="sb-card-line">{html.escape(str(linea))}</div>')
+            texto = html.escape(str(linea))
+            partes.append(f'<div class="sb-card-line" title="{texto}">{texto}</div>')
     return "".join(partes)
 
 
@@ -1600,21 +1692,32 @@ def _render_fila_cliente(cli, cot_por_cliente, en_proceso_por_cliente, completad
         rubro_y_productos = " · ".join(v for v in (cli.get("rubro"), cli.get("productos_interes")) if v)
         etapa_crm = (etapa_por_cliente or {}).get(cli["id"])
         badge_html = f'<div style="margin-top:4px;">{_badge_etapa(etapa_crm)}</div>' if etapa_crm else ""
+        # Antes esta línea se mostraba siempre, con "—" como fallback cuando
+        # el cliente no tiene rubro ni producto cargado (frecuente en
+        # "Cotizados", que son clientes recién pasados del CRM). Un renglón
+        # completo solo para un guión huérfano se leía como un dato roto —
+        # directamente no se renderiza la línea si no hay nada que mostrar.
+        rubro_html = (
+            f'<div style="font-size: 12px; color: #64748b; margin-top: 2px; line-height: 1.3;">'
+            f'{html.escape(rubro_y_productos)}</div>'
+        ) if rubro_y_productos else ""
         c1.markdown(
             f'<div style="font-weight: 700; font-size: 14px;">{html.escape(cli["nombre"])}</div>'
-            f'<div style="font-size: 12px; color: #64748b; margin-top: 2px; line-height: 1.3;">'
-            f'{html.escape(rubro_y_productos) or "—"}'
-            f'</div>{badge_html}',
+            f'{rubro_html}{badge_html}',
             unsafe_allow_html=True,
         )
 
         # Un único bloque HTML con line-height ajustado: 3 st.caption sueltos
         # dejaban un espacio muerto entre renglones que engordaba la card.
         c2.markdown(
+            # Mismo ícono (🚢) para "en proceso" y "completadas": son la
+            # misma cosa (una importación) en dos estados distintos, no dos
+            # conceptos separados — antes usaban 📦 para "completadas" y se
+            # leía como si fuera otra categoría de dato.
             f'<div style="font-size: 12px; color: #64748b; line-height: 1.3;">'
             f'<div>📑 Cotizaciones realizadas: <b>{cot_count}</b></div>'
             f'<div>🚢 Importaciones en proceso: <b>{en_proceso}</b></div>'
-            f'<div>📦 Importaciones completadas: <b>{completadas}</b></div>'
+            f'<div>🚢 Importaciones completadas: <b>{completadas}</b></div>'
             f'</div>',
             unsafe_allow_html=True,
         )
@@ -3006,7 +3109,11 @@ def _render_fila_cotizacion(c, etapa_por_cliente=None):
             if etapa_crm:
                 st.markdown(_badge_etapa(etapa_crm), unsafe_allow_html=True)
         c3.markdown(
-            f'<div style="font-size:12px; color:#64748b; line-height:1.35;">'
+            # text-align: left explícito: sin esto el "—" de fallback (un
+            # solo carácter, a diferencia del texto real que ocupa varias
+            # palabras) quedaba centrado en la columna en vez de alineado
+            # al resto de las filas de la lista.
+            f'<div style="font-size:12px; color:#64748b; line-height:1.35; text-align:left;">'
             f'{html.escape(c.get("productos_desc") or "—")}</div>',
             unsafe_allow_html=True,
         )
@@ -3255,7 +3362,10 @@ def _render_carga_rapida_contacto():
             cr1, cr2, cr3, cr4, cr5 = st.columns([2.3, 2, 1.7, 2.2, 1.3], vertical_alignment="bottom")
             nombre_rapido = cr1.text_input("Nombre", label_visibility="collapsed", placeholder="Nombre de contacto")
             cuit_rapido = cr2.text_input("CUIT", label_visibility="collapsed", placeholder="CUIT (opcional)")
-            telefono_rapido = cr3.text_input("Teléfono", label_visibility="collapsed", placeholder="Teléfono / WhatsApp")
+            # Placeholder acortado ("Teléfono / WhatsApp" completo no entraba
+            # en esta columna, angosta a propósito porque un teléfono es
+            # corto — se cortaba en "...WhatsAp").
+            telefono_rapido = cr3.text_input("Teléfono", label_visibility="collapsed", placeholder="Tel. / WhatsApp")
             email_rapido = cr4.text_input("Email", label_visibility="collapsed", placeholder="Email (opcional)")
             if cr5.form_submit_button("＋ Agregar", use_container_width=True, type="primary"):
                 email_norm = crm.normalizar_email(email_rapido)
@@ -4076,7 +4186,14 @@ def _render_analitica_crm():
                     marker={"color": [crm.COLOR_ETAPA.get(s, "#64748B") for s in etapas_tiempo]},
                     text=[f"{v:.1f} d" for v in valores], textposition="outside", cliponaxis=False,
                 ))
-                figt.update_xaxes(visible=False)
+                # cliponaxis=False evita que la etiqueta se corte JUSTO en el
+                # borde del eje, pero el eje (oculto) igual autoescalaba su
+                # rango al valor máximo de la barra más larga — sin aire
+                # extra a la derecha, la etiqueta de esa barra quedaba fuera
+                # del área visible del gráfico (ej. "3.1 días" se veía como
+                # "3.1 d"). 25% de margen extra le da lugar al texto más
+                # largo sin afectar la escala real de las barras.
+                figt.update_xaxes(visible=False, range=[0, max(valores) * 1.25])
                 figt.update_yaxes(autorange="reversed")
                 st.plotly_chart(_layout_transparente(figt, 340), use_container_width=True)
 
@@ -4118,7 +4235,10 @@ def _render_analitica_crm():
                 marker={"color": "#E8652A"},
                 text=df_origen["Cantidad"], textposition="outside", cliponaxis=False,
             ))
-            fig3.update_xaxes(visible=False)
+            # Mismo margen extra que en "Tiempo promedio por etapa" — sin
+            # esto la etiqueta de la barra más larga puede quedar cortada
+            # contra el borde del gráfico.
+            fig3.update_xaxes(visible=False, range=[0, df_origen["Cantidad"].max() * 1.25])
             st.plotly_chart(_layout_transparente(fig3, max(180, 40 * len(df_origen))), use_container_width=True)
 
 
