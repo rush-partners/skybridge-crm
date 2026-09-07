@@ -449,10 +449,11 @@ __SB_VARS__
         "clientecard_" son filas con botones reales (formulario o
         "＋ Cotizar"/"Ver ficha →"); "resultgroup_" son grupos de métricas de
         solo lectura (Resultado de la operación / Simulación de venta), sin
-        botones. */
+        botones. "actev_" son eventos de timeline (ficha de contacto CRM),
+        de solo lectura como "resultgroup_" pero sin métricas. */
         [class*="st-key-cardwrap_"], [class*="st-key-formrow_"], [class*="st-key-clientecard_"],
         [class*="st-key-resultgroup_"], [class*="st-key-cotfila_"], [class*="st-key-filacrm_"],
-        [class*="st-key-impfila_"] {
+        [class*="st-key-impfila_"], [class*="st-key-actev_"] {
             background: var(--sb-surface) !important;
             border: 1px solid var(--sb-border) !important;
             border-left: 3px solid var(--sb-orange) !important;
@@ -2858,110 +2859,134 @@ def _render_panel_importaciones():
                 st.caption(f"+{len(items) - LIMITE_TARJETAS_POR_COLUMNA} más — refiná la búsqueda para verlas")
 
 
+@st.dialog("Restaurar backup")
+def _dialog_confirmar_restaurar_backup():
+    st.warning(
+        "¿Confirmás restaurar este backup? Esto reemplaza TODOS los datos actuales de la base — "
+        "esta acción no se puede deshacer. Antes de aplicarlo se guarda un backup de seguridad del "
+        "estado actual, por las dudas."
+    )
+    c1, c2 = st.columns(2)
+    if c1.button("Cancelar", use_container_width=True, key="config_restaurar_cancelar"):
+        st.session_state.pop("_restaurar_backup_bytes", None)
+        st.rerun()
+    if c2.button("Sí, restaurar", type="primary", use_container_width=True, key="config_restaurar_confirmar"):
+        db.backup_antes_de_borrar("restauracion_manual")
+        db.restaurar_desde_sqlite_bytes(st.session_state.pop("_restaurar_backup_bytes"))
+        st.success("Base restaurada. La página se va a recargar.")
+        st.rerun()
+
+
 def _render_configuracion():
-    st.caption(
-        "Parámetros generales del sistema. Se guardan en la base y los usa toda la app — "
-        "ningún valor de estos queda fijo en el código."
-    )
-    dias_actual = int(db.get_setting("dias_sin_respuesta", db.SETTINGS_DEFAULTS["dias_sin_respuesta"]))
-    with st.form("form_config_general"):
-        nuevo_valor = st.number_input(
-            "CRM — Días sin respuesta para considerar una cotización 'Enviada' como vencida "
-            "(usado en los sub-filtros de seguimiento del CRM)",
-            min_value=1, value=dias_actual, step=1,
+    with st.container(border=True, key="cardwrap_config_parametros"):
+        st.markdown("#### ⚙️ Parámetros generales")
+        st.caption(
+            "Se guardan en la base y los usa toda la app — ningún valor de estos queda fijo en el código."
         )
-        if st.form_submit_button("💾 Guardar", type="primary"):
-            db.set_setting("dias_sin_respuesta", int(nuevo_valor))
-            _flash("Configuración guardada.")
-            st.rerun()
-
-    st.divider()
-    st.markdown("#### 🔁 Migración retroactiva de contactos CRM")
-    st.caption(
-        "Crea el contacto de CRM que le falte a cada cliente ya cargado (los que nacieron antes "
-        "de que el alta de cliente generara uno solo), en la etapa que corresponde a su evidencia "
-        "real: importación creada o cotización aprobada → Cliente; cualquier otra cotización → "
-        "Cotizado; nada todavía → Nuevo. Segura de correr más de una vez: los clientes que ya "
-        "tienen contacto vinculado se saltean solos."
-    )
-    if st.button("▶️ Ejecutar migración", key="btn_migrar_retroactivo"):
-        with st.spinner("Migrando contactos..."):
-            try:
-                resultado = _migrar_contactos_retroactivos()
-            except db.DBError as e:
-                st.error(f"No se pudo completar la migración: {e}")
-                resultado = None
-        if resultado is None:
-            pass
-        elif not resultado:
-            st.info("No había clientes sin contacto de CRM vinculado — nada para migrar.")
-        else:
-            st.success(f"Se creó el contacto de CRM para {len(resultado)} cliente(s):")
-            for nombre, etapa in resultado:
-                st.markdown(f"- **{nombre}** → {crm.ETAPA_LABEL.get(etapa, etapa)}")
-
-    st.divider()
-    st.markdown("#### 👤 Usuarios")
-    for u in db.list_usuarios():
-        cu1, cu2, cu3 = st.columns([2.5, 1, 1])
-        cu1.markdown(f"**{u['nombre']}** (`{u['username']}`)")
-        cu2.caption("Activo" if u["activo"] else "Desactivado")
-        es_yo = u["id"] == st.session_state.usuario_autenticado.get("id")
-        if not es_yo:
-            if cu3.button("Desactivar" if u["activo"] else "Reactivar", key=f"toggleuser_{u['id']}"):
-                db.set_usuario_activo(u["id"], 0 if u["activo"] else 1)
+        dias_actual = int(db.get_setting("dias_sin_respuesta", db.SETTINGS_DEFAULTS["dias_sin_respuesta"]))
+        with st.form("form_config_general"):
+            nuevo_valor = st.number_input(
+                "CRM — Días sin respuesta para considerar una cotización 'Enviada' como vencida "
+                "(usado en los sub-filtros de seguimiento del CRM)",
+                min_value=1, value=dias_actual, step=1,
+            )
+            if st.form_submit_button("💾 Guardar", type="primary"):
+                db.set_setting("dias_sin_respuesta", int(nuevo_valor))
+                _flash("Configuración guardada.")
                 st.rerun()
-    with st.form("form_nuevo_usuario", clear_on_submit=True):
-        st.caption("Agregar usuario nuevo")
-        nu_username = st.text_input("Usuario", key="nu_username")
-        nu_nombre = st.text_input("Nombre", key="nu_nombre")
-        nu_password = st.text_input("Contraseña inicial", type="password", key="nu_password")
-        if st.form_submit_button("Crear"):
-            if nu_username and nu_nombre and nu_password:
-                db.create_usuario(nu_username, nu_password, nu_nombre)
-                _flash(f"Usuario '{nu_nombre}' creado.")
-                st.rerun()
-            else:
-                st.error("Completá usuario, nombre y contraseña.")
 
-    st.divider()
-    st.markdown("#### 💾 Backup")
-    # exportar_backup_sqlite() hace un SELECT * por cada tabla de la base
-    # (11 en total) — con Turso eso tarda ~3s. st.download_button necesita
-    # los bytes YA armados para poder dibujarse, así que antes corría en
-    # CADA render de Configuración (y como st.tabs ejecuta las 3 pestañas
-    # siempre, eso eran ~3s de más en CADA carga del Panel de Control,
-    # aunque nadie tocara este botón). Separarlo en dos pasos — preparar,
-    # después descargar — hace que esas 11 consultas corran solo cuando de
-    # verdad se van a usar.
-    if st.button("📦 Preparar backup para descargar"):
-        with st.spinner("Armando el backup..."):
-            st.session_state["_backup_bytes"] = db.exportar_backup_sqlite()
-            st.session_state["_backup_nombre"] = f"skybridge_backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.db"
-    if "_backup_bytes" in st.session_state:
-        st.download_button(
-            "⬇️ Descargar backup de la base",
-            data=st.session_state["_backup_bytes"],
-            file_name=st.session_state["_backup_nombre"],
-            mime="application/octet-stream",
+    with st.container(border=True, key="cardwrap_config_migracion"):
+        st.markdown("#### 🔁 Migración retroactiva de contactos CRM")
+        st.caption(
+            "Crea el contacto de CRM que le falte a cada cliente ya cargado (los que nacieron antes "
+            "de que el alta de cliente generara uno solo), en la etapa que corresponde a su evidencia "
+            "real: importación creada o cotización aprobada → Cliente; cualquier otra cotización → "
+            "Cotizado; nada todavía → Nuevo. Segura de correr más de una vez: los clientes que ya "
+            "tienen contacto vinculado se saltean solos."
         )
-
-    st.divider()
-    st.markdown("#### ♻️ Restaurar backup")
-    st.caption("Reemplaza la base de datos actual por un archivo .db subido acá. Esta acción no se puede deshacer.")
-    with st.form("form_restaurar_backup_config"):
-        archivo_restaurar = st.file_uploader("Archivo .db a restaurar", type=["db"], key="restaurar_backup_uploader")
-        confirmar_restaurar = st.checkbox("Entiendo que esto reemplaza todos los datos actuales")
-        if st.form_submit_button("Restaurar este backup"):
-            if not archivo_restaurar:
-                st.error("Subí un archivo primero.")
-            elif not confirmar_restaurar:
-                st.error("Tenés que confirmar el checkbox antes de restaurar.")
+        if st.button("▶️ Ejecutar migración", key="btn_migrar_retroactivo"):
+            with st.spinner("Migrando contactos..."):
+                try:
+                    resultado = _migrar_contactos_retroactivos()
+                except db.DBError as e:
+                    st.error(f"No se pudo completar la migración: {e}")
+                    resultado = None
+            if resultado is None:
+                pass
+            elif not resultado:
+                st.info("No había clientes sin contacto de CRM vinculado — nada para migrar.")
             else:
-                db.backup_antes_de_borrar("restauracion_manual")
-                db.restaurar_desde_sqlite_bytes(archivo_restaurar.getvalue())
-                st.success("Base restaurada. La página se va a recargar.")
-                st.rerun()
+                st.success(f"Se creó el contacto de CRM para {len(resultado)} cliente(s):")
+                for nombre, etapa in resultado:
+                    st.markdown(f"- **{nombre}** → {crm.ETAPA_LABEL.get(etapa, etapa)}")
+
+    with st.container(border=True, key="cardwrap_config_usuarios"):
+        st.markdown("#### 👤 Usuarios")
+        for u in db.list_usuarios():
+            cu1, cu2, cu3 = st.columns([2.5, 1, 1])
+            cu1.markdown(f"**{u['nombre']}** (`{u['username']}`)")
+            cu2.caption("Activo" if u["activo"] else "Desactivado")
+            es_yo = u["id"] == st.session_state.usuario_autenticado.get("id")
+            if not es_yo:
+                if cu3.button("Desactivar" if u["activo"] else "Reactivar", key=f"toggleuser_{u['id']}"):
+                    db.set_usuario_activo(u["id"], 0 if u["activo"] else 1)
+                    st.rerun()
+        with st.form("form_nuevo_usuario", clear_on_submit=True):
+            st.caption("Agregar usuario nuevo")
+            nu_username = st.text_input("Usuario", key="nu_username")
+            nu_nombre = st.text_input("Nombre", key="nu_nombre")
+            nu_password = st.text_input("Contraseña inicial", type="password", key="nu_password")
+            if st.form_submit_button("Crear"):
+                if nu_username and nu_nombre and nu_password:
+                    db.create_usuario(nu_username, nu_password, nu_nombre)
+                    _flash(f"Usuario '{nu_nombre}' creado.")
+                    st.rerun()
+                else:
+                    st.error("Completá usuario, nombre y contraseña.")
+
+    with st.container(border=True, key="cardwrap_config_backup"):
+        st.markdown("#### 💾 Backup")
+        # exportar_backup_sqlite() hace un SELECT * por cada tabla de la base
+        # (11 en total) — con Turso eso tarda ~3s. st.download_button necesita
+        # los bytes YA armados para poder dibujarse, así que antes corría en
+        # CADA render de Configuración (y como st.tabs ejecuta las 3 pestañas
+        # siempre, eso eran ~3s de más en CADA carga del Panel de Control,
+        # aunque nadie tocara este botón). Separarlo en dos pasos — preparar,
+        # después descargar — hace que esas 11 consultas corran solo cuando de
+        # verdad se van a usar.
+        if st.button("📦 Preparar backup para descargar"):
+            with st.spinner("Armando el backup..."):
+                st.session_state["_backup_bytes"] = db.exportar_backup_sqlite()
+                st.session_state["_backup_nombre"] = f"skybridge_backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.db"
+        if "_backup_bytes" in st.session_state:
+            st.download_button(
+                "⬇️ Descargar backup de la base",
+                data=st.session_state["_backup_bytes"],
+                file_name=st.session_state["_backup_nombre"],
+                mime="application/octet-stream",
+            )
+
+    with st.container(border=True, key="cardwrap_config_restaurar"):
+        st.markdown("#### ♻️ Restaurar backup")
+        st.caption("Reemplaza la base de datos actual por un archivo .db subido acá. Esta acción no se puede deshacer.")
+        with st.form("form_restaurar_backup_config"):
+            archivo_restaurar = st.file_uploader("Archivo .db a restaurar", type=["db"], key="restaurar_backup_uploader")
+            confirmar_restaurar = st.checkbox("Entiendo que esto reemplaza todos los datos actuales")
+            if st.form_submit_button("Restaurar este backup"):
+                if not archivo_restaurar:
+                    st.error("Subí un archivo primero.")
+                elif not confirmar_restaurar:
+                    st.error("Tenés que confirmar el checkbox antes de restaurar.")
+                else:
+                    # El pedido de confirmación final vive afuera del form (más
+                    # abajo): un st.dialog llamado todavía "adentro" del
+                    # st.form no es un patrón usado en ningún otro lado de la
+                    # app, así que se guardan los bytes y se abre el diálogo
+                    # recién en la próxima línea del mismo run.
+                    st.session_state["_restaurar_backup_bytes"] = archivo_restaurar.getvalue()
+
+    if "_restaurar_backup_bytes" in st.session_state:
+        _dialog_confirmar_restaurar_backup()
 
 
 def vista_panel_control():
@@ -3628,10 +3653,11 @@ def _render_lista_contactos():
     _render_carga_rapida_contacto()
     _render_importar_contactos_masivo()
 
-    search = st.text_input(
-        "Buscar por nombre, empresa o CUIT", placeholder="🔎 Buscar por nombre, empresa o CUIT...",
-        label_visibility="collapsed", key="crm_search",
-    )
+    with st.container(border=True, key="formrow_crm_busqueda"):
+        search = st.text_input(
+            "Buscar por nombre, empresa o CUIT", placeholder="🔎 Buscar por nombre, empresa o CUIT...",
+            label_visibility="collapsed", key="crm_search",
+        )
 
     todos = db.list_contacts(search=search)
     # 'Ganado' ya tiene su propia columna ('cliente', ver crm.kanban_grupo)
@@ -3907,43 +3933,44 @@ def _render_ficha_contacto(c):
     tab_datos_cliente, tab_cotizaciones = st.tabs(["📁 Datos Cliente", "🧾 Cotizaciones"])
 
     with tab_datos_cliente:
-        st.markdown("#### 📁 Datos")
-        with st.form(f"edit_contacto_{c['id']}"):
-            c1, c2 = st.columns(2)
-            nombre = c1.text_input("Nombre de contacto", value=c["nombre"], key=f"cn_{c['id']}")
-            empresa = c2.text_input("Empresa", value=c.get("empresa") or "", key=f"ce_{c['id']}")
-            c3, c4 = st.columns(2)
-            cuit = c3.text_input("CUIT", value=c.get("cuit") or "", key=f"ccuit_{c['id']}")
-            email = c4.text_input("Email", value=c.get("email") or "", key=f"cem_{c['id']}")
-            c5, c6 = st.columns(2)
-            whatsapp = c5.text_input("WhatsApp", value=c.get("whatsapp") or "", key=f"cw_{c['id']}")
-            origen = c6.text_input("Origen", value=c.get("origen") or "", key=f"co_{c['id']}")
-            c7, c8 = st.columns(2)
-            asignado_a = c7.text_input("Asignado a", value=c.get("asignado_a") or "", key=f"ca_{c['id']}")
-            proximo_seguimiento = c8.date_input(
-                "Próximo seguimiento", value=_parse_fecha(c.get("proximo_seguimiento")),
-                format="DD/MM/YYYY", key=f"cps_{c['id']}",
-            )
-            b1, b2 = st.columns(2)
-            if b1.form_submit_button("💾 Guardar cambios"):
-                email_norm = crm.normalizar_email(email)
-                if email_norm and not crm.email_valido(email_norm):
-                    st.error("Ese email no parece válido.")
-                elif not crm.whatsapp_valido(whatsapp):
-                    st.error("Ese teléfono/WhatsApp no parece válido (revisá la cantidad de dígitos).")
-                else:
-                    db.update_contact(
-                        c["id"], nombre, empresa, email_norm, crm.normalizar_whatsapp(whatsapp),
-                        origen, asignado_a, proximo_seguimiento.isoformat() if proximo_seguimiento else None,
-                        cuit,
-                    )
-                    st.success("Actualizado.")
+        with st.container(border=True, key=f"formrow_datos_contacto_{c['id']}"):
+            st.markdown("#### 📁 Datos")
+            with st.form(f"edit_contacto_{c['id']}"):
+                c1, c2 = st.columns(2)
+                nombre = c1.text_input("Nombre de contacto", value=c["nombre"], key=f"cn_{c['id']}")
+                empresa = c2.text_input("Empresa", value=c.get("empresa") or "", key=f"ce_{c['id']}")
+                c3, c4 = st.columns(2)
+                cuit = c3.text_input("CUIT", value=c.get("cuit") or "", key=f"ccuit_{c['id']}")
+                email = c4.text_input("Email", value=c.get("email") or "", key=f"cem_{c['id']}")
+                c5, c6 = st.columns(2)
+                whatsapp = c5.text_input("WhatsApp", value=c.get("whatsapp") or "", key=f"cw_{c['id']}")
+                origen = c6.text_input("Origen", value=c.get("origen") or "", key=f"co_{c['id']}")
+                c7, c8 = st.columns(2)
+                asignado_a = c7.text_input("Asignado a", value=c.get("asignado_a") or "", key=f"ca_{c['id']}")
+                proximo_seguimiento = c8.date_input(
+                    "Próximo seguimiento", value=_parse_fecha(c.get("proximo_seguimiento")),
+                    format="DD/MM/YYYY", key=f"cps_{c['id']}",
+                )
+                b1, b2 = st.columns(2)
+                if b1.form_submit_button("💾 Guardar cambios"):
+                    email_norm = crm.normalizar_email(email)
+                    if email_norm and not crm.email_valido(email_norm):
+                        st.error("Ese email no parece válido.")
+                    elif not crm.whatsapp_valido(whatsapp):
+                        st.error("Ese teléfono/WhatsApp no parece válido (revisá la cantidad de dígitos).")
+                    else:
+                        db.update_contact(
+                            c["id"], nombre, empresa, email_norm, crm.normalizar_whatsapp(whatsapp),
+                            origen, asignado_a, proximo_seguimiento.isoformat() if proximo_seguimiento else None,
+                            cuit,
+                        )
+                        st.success("Actualizado.")
+                        st.rerun()
+                if b2.form_submit_button("🗑️ Eliminar contacto"):
+                    db.delete_contact(c["id"])
+                    st.session_state.contacto_seleccionado = None
+                    st.warning("Contacto eliminado.")
                     st.rerun()
-            if b2.form_submit_button("🗑️ Eliminar contacto"):
-                db.delete_contact(c["id"])
-                st.session_state.contacto_seleccionado = None
-                st.warning("Contacto eliminado.")
-                st.rerun()
 
         st.divider()
         st.markdown("#### 🕓 Timeline")
@@ -4282,7 +4309,8 @@ def vista_crm():
     # formulario colapsado), acá la alta rápida ya vive siempre visible
     # arriba del buscador de "👥 Contactos" (_render_carga_rapida_contacto),
     # así que no hace falta ningún botón de header para mostrarla.
-    st.title("CRM")
+    st.header("🤝 CRM")
+    st.caption("Contactos y seguimiento comercial — gestioná el embudo de ventas y mirá las analíticas del equipo.")
 
     tab_lista, tab_analitica = st.tabs(["👥 Contactos", "📈 Analíticas"])
     with tab_lista:
