@@ -2783,39 +2783,46 @@ def _render_panel_importaciones():
 
     st.markdown("#### Seguimiento por estado")
     clientes_con_imp = sorted({i["cliente_nombre"] for i in imps_todas if i.get("cliente_nombre")})
+    productos_con_imp = sorted({i["producto"] for i in imps_todas if i.get("producto")})
 
-    # Los 6 filtros (buscador, 2 selects, 2 fechas, 1 checkbox) vivían
-    # sueltos en 2 filas de columnas, sin ninguna superficie propia que los
-    # agrupe — se leían como 6 controles desconectados flotando sobre el
-    # fondo de la página en vez de un único bloque de filtros, a diferencia
-    # del resto de los buscadores de la app (formrow_cotizador_filtros y
-    # los de Clientes). Misma card acá.
+    # Antes "cliente" y "producto" se buscaban juntos, a los ponchazos, en
+    # el mismo texto libre que "número" — un cliente con un nombre parecido
+    # a un producto (o viceversa) daba falsos positivos, y no había forma
+    # de filtrar por cliente/producto exactos sin escribir el nombre
+    # completo. Ahora cada uno tiene su propio selectbox (el combobox de
+    # Streamlit ya deja escribir para filtrar las opciones, así que sigue
+    # siendo "buscar y que se despliegue", pero sobre valores reales de la
+    # base en vez de texto libre) y el rango de ETA pasa a un solo campo de
+    # rango en vez de 2 date_input separados — mismo patrón que "Rango de
+    # fechas" en Filtros avanzados del Cotizador. Todo en un solo renglón,
+    # agrupado en la misma card "formrow_" que el resto de los buscadores.
     with st.container(border=True, key="formrow_panel_filtros_imp"):
-        c1, c2, c3 = st.columns([2.2, 1.3, 1.3])
-        busqueda = c1.text_input(
-            "🔎 Buscar por número, cliente o producto", key="panel_busqueda_imp",
-            placeholder="Filtrar el tablero por número, cliente o producto...",
+        c1, c2, c3, c4, c5, c6 = st.columns(
+            [1.3, 1.5, 1.5, 1.7, 1.5, 1.2], vertical_alignment="bottom",
+        )
+        numero_filtro = c1.text_input(
+            "🔎 Número", key="panel_busqueda_imp", placeholder="Buscar por número...",
         )
         cliente_filtro = c2.selectbox("Cliente", ["Todos"] + clientes_con_imp, key="panel_filtro_cliente_imp")
-        tipo_filtro = c3.selectbox("Tipo de envío", ["Todos"] + TIPOS_ENVIO, key="panel_filtro_tipo_imp")
-
-        c4, c5, c6 = st.columns([1.3, 1.3, 1.3])
-        fecha_desde = c4.date_input("ETA desde", value=None, key="panel_filtro_eta_desde", format="DD/MM/YYYY")
-        fecha_hasta = c5.date_input("ETA hasta", value=None, key="panel_filtro_eta_hasta", format="DD/MM/YYYY")
-        c6.write("")
+        producto_filtro = c3.selectbox("Producto", ["Todos"] + productos_con_imp, key="panel_filtro_producto_imp")
+        rango_eta = c4.date_input(
+            "Rango ETA", value=(), format="DD/MM/YYYY", key="panel_filtro_eta_rango",
+        )
+        tipo_filtro = c5.selectbox("Tipo de envío", ["Todos"] + TIPOS_ENVIO, key="panel_filtro_tipo_imp")
         ocultar_entregadas = c6.checkbox("Ocultar entregadas", key="panel_ocultar_entregadas")
 
+    fecha_desde = fecha_hasta = None
+    if isinstance(rango_eta, (tuple, list)) and len(rango_eta) == 2:
+        fecha_desde, fecha_hasta = rango_eta
+
     imps = imps_todas
-    if busqueda:
-        b = busqueda.strip().lower()
-        imps = [
-            i for i in imps
-            if b in (i.get("numero") or "").lower()
-            or b in (i.get("cliente_nombre") or "").lower()
-            or b in (i.get("producto") or "").lower()
-        ]
+    if numero_filtro:
+        b = numero_filtro.strip().lower()
+        imps = [i for i in imps if b in (i.get("numero") or "").lower()]
     if cliente_filtro != "Todos":
         imps = [i for i in imps if i.get("cliente_nombre") == cliente_filtro]
+    if producto_filtro != "Todos":
+        imps = [i for i in imps if i.get("producto") == producto_filtro]
     if tipo_filtro != "Todos":
         imps = [i for i in imps if i.get("tipo_envio") == tipo_filtro]
     if fecha_desde:
