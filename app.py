@@ -1474,12 +1474,12 @@ def _render_fila_importacion_cliente(imp):
         prefijo = f"{icono} " if icono else ""
         c1.markdown(
             f'<div style="font-weight:700; font-size:14px;">{prefijo}{html.escape(imp["numero"])}</div>'
-            f'<div style="font-size:12px; color:#64748b; margin-top:2px;">{html.escape(imp.get("tipo_envio") or "—")}</div>',
+            f'<div style="font-size:12px; color:var(--sb-text-secondary); margin-top:2px;">{html.escape(imp.get("tipo_envio") or "—")}</div>',
             unsafe_allow_html=True,
         )
         c2.markdown(
             f'<div style="font-size:13px; font-weight:600;">{html.escape(imp.get("proveedor_nombre") or "sin proveedor")}</div>'
-            f'<div style="font-size:12px; color:#64748b;">{html.escape(imp.get("proveedor_pais") or "—")}</div>',
+            f'<div style="font-size:12px; color:var(--sb-text-secondary);">{html.escape(imp.get("proveedor_pais") or "—")}</div>',
             unsafe_allow_html=True,
         )
         c3.markdown(
@@ -1709,7 +1709,7 @@ def _render_fila_cliente(cli, cot_por_cliente, en_proceso_por_cliente, completad
         # completo solo para un guión huérfano se leía como un dato roto —
         # directamente no se renderiza la línea si no hay nada que mostrar.
         rubro_html = (
-            f'<div style="font-size: 12px; color: #64748b; margin-top: 2px; line-height: 1.3;">'
+            f'<div style="font-size: 12px; color: var(--sb-text-secondary); margin-top: 2px; line-height: 1.3;">'
             f'{html.escape(rubro_y_productos)}</div>'
         ) if rubro_y_productos else ""
         c1.markdown(
@@ -1725,7 +1725,7 @@ def _render_fila_cliente(cli, cot_por_cliente, en_proceso_por_cliente, completad
             # misma cosa (una importación) en dos estados distintos, no dos
             # conceptos separados — antes usaban 📦 para "completadas" y se
             # leía como si fuera otra categoría de dato.
-            f'<div style="font-size: 12px; color: #64748b; line-height: 1.3;">'
+            f'<div style="font-size: 12px; color: var(--sb-text-secondary); line-height: 1.3;">'
             f'<div>📑 Cotizaciones realizadas: <b>{cot_count}</b></div>'
             f'<div>🚢 Importaciones en proceso: <b>{en_proceso}</b></div>'
             f'<div>🚢 Importaciones completadas: <b>{completadas}</b></div>'
@@ -3146,7 +3146,7 @@ def _render_fila_cotizacion(c, etapa_por_cliente=None):
         c1, c2, c3, c_estado, c4 = st.columns([1.5, 2.0, 2.3, 1.5, 2.7], vertical_alignment="center")
         c1.markdown(
             f'<div style="font-weight:700; font-size:14px;">{html.escape(c["numero"])}</div>'
-            f'<div style="font-size:12px; color:#64748b; margin-top:2px;">{_fmt_fecha_cotizacion(c.get("fecha"))}</div>',
+            f'<div style="font-size:12px; color:var(--sb-text-secondary); margin-top:2px;">{_fmt_fecha_cotizacion(c.get("fecha"))}</div>',
             unsafe_allow_html=True,
         )
         with c2:
@@ -3174,7 +3174,7 @@ def _render_fila_cotizacion(c, etapa_por_cliente=None):
             # solo carácter, a diferencia del texto real que ocupa varias
             # palabras) quedaba centrado en la columna en vez de alineado
             # al resto de las filas de la lista.
-            f'<div style="font-size:12px; color:#64748b; line-height:1.35; text-align:left;">'
+            f'<div style="font-size:12px; color:var(--sb-text-secondary); line-height:1.35; text-align:left;">'
             f'{html.escape(c.get("productos_desc") or "—")}</div>',
             unsafe_allow_html=True,
         )
@@ -3290,7 +3290,7 @@ def _render_historial_cotizaciones():
     total = len(cots)
 
     st.markdown(
-        f'<div style="font-size:13px; font-weight:600; color:#64748b; margin:2px 0 10px 2px;">'
+        f'<div style="font-size:13px; font-weight:600; color:var(--sb-text-secondary); margin:2px 0 10px 2px;">'
         f'{total} cotización(es) encontrada(s)</div>',
         unsafe_allow_html=True,
     )
@@ -3317,7 +3317,7 @@ def _render_historial_cotizaciones():
             st.session_state.cotizador_pagina = pagina - 1
             st.rerun()
         cnav2.markdown(
-            f'<div style="text-align:center; font-size:13px; color:#64748b;">'
+            f'<div style="text-align:center; font-size:13px; color:var(--sb-text-secondary);">'
             f'Página {pagina} de {total_paginas}</div>',
             unsafe_allow_html=True,
         )
@@ -3521,7 +3521,7 @@ def _render_fila_contacto_crm(c, en_curso_por_cliente=None):
         subt = " · ".join(v for v in (c.get("empresa"), c.get("cuit")) if v)
         linea_nombre = f'<div style="font-weight:700; font-size:14px;">{html.escape(c["nombre"])}</div>'
         if subt:
-            linea_nombre += f'<div style="font-size:12px; color:#64748b;">{html.escape(subt)}</div>'
+            linea_nombre += f'<div style="font-size:12px; color:var(--sb-text-secondary);">{html.escape(subt)}</div>'
         c1.markdown(linea_nombre, unsafe_allow_html=True)
 
         with c2:
@@ -3530,7 +3530,7 @@ def _render_fila_contacto_crm(c, en_curso_por_cliente=None):
             actividad_txt = f"hace {dias_act} día(s)" if dias_act is not None else "sin actividad"
             linea_seguimiento = f"📅 {seguimiento_txt} · " if seguimiento_txt else ""
             st.markdown(
-                f'<div style="font-size:12px; color:#64748b;">{linea_seguimiento}🕓 {actividad_txt}</div>',
+                f'<div style="font-size:12px; color:var(--sb-text-secondary);">{linea_seguimiento}🕓 {actividad_txt}</div>',
                 unsafe_allow_html=True,
             )
             if _seguimiento_vencido(c):
@@ -3578,7 +3578,7 @@ def _render_fila_contacto_crm(c, en_curso_por_cliente=None):
                 dias_act = _dias_desde_actividad(c)
                 actividad_txt = f"hace {dias_act} día(s)" if dias_act is not None else "sin actividad"
                 st.markdown(
-                    f'<div style="font-size:12px; color:#64748b; line-height:1.6; padding-top:10px;">'
+                    f'<div style="font-size:12px; color:var(--sb-text-secondary); line-height:1.6; padding-top:10px;">'
                     f'📦 {n_en_curso} importación(es) en curso<br>🕓 última actividad {actividad_txt}</div>',
                     unsafe_allow_html=True,
                 )
@@ -3999,7 +3999,7 @@ def _render_ficha_contacto(c):
             with st.container(border=True, key=f"actev_{ev['id']}"):
                 autor_txt = f" · {html.escape(ev['autor'])}" if ev.get("autor") else ""
                 st.markdown(
-                    f'<div style="font-size:12px; color:#64748b;">{etiqueta} · '
+                    f'<div style="font-size:12px; color:var(--sb-text-secondary);">{etiqueta} · '
                     f'{_fmt_fecha_hora(ev["fecha"])}{autor_txt}</div>',
                     unsafe_allow_html=True,
                 )
