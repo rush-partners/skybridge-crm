@@ -17,11 +17,41 @@ from datetime import datetime, timedelta
 import bcrypt
 import streamlit as st
 import turso_serverless
+from turso_serverless.session import ProtocolError
+
+
+def _reintentar_stream_perdido(metodo_original):
+    """Turso cierra del lado del servidor cualquier stream que quedó
+    inactivo un rato (unos segundos/minutos sin consultas) — típico
+    después de un redeploy, o simplemente cuando el usuario tarda en leer
+    la pantalla antes del siguiente click. La conexión igual sigue viva
+    (el socket keep-alive de _post_keepalive no se cortó), pero el
+    servidor ya no reconoce el "baton" que arrastrábamos, y responde con
+    "stream not found" — eso se propagaba tal cual hasta la pantalla del
+    usuario como un error fatal, obligando a recargar TODO el navegador
+    (perdiendo el login) para que se abriera una sesión nueva.
+
+    Es seguro reintentar UNA vez en este caso puntual: cuando el server
+    rechaza el baton, rechaza el pedido ANTES de tocar la base — no llegó
+    a ejecutar nada, así que no hay riesgo de duplicar un INSERT/UPDATE
+    (a diferencia de un timeout de red genérico, donde no se sabe si el
+    pedido llegó a aplicarse o no, y por eso ESE caso no se reintenta acá).
+    Para cuando este wrapper ve la excepción, Session._post ya dejó
+    self._baton en None (via _reset_stream, ver session.py de la
+    librería), así que el reintento sale pidiendo un stream nuevo solo."""
+    def envoltorio(self, *args, **kwargs):
+        try:
+            return metodo_original(self, *args, **kwargs)
+        except ProtocolError as e:
+            if "stream not found" not in str(e).lower():
+                raise
+            return metodo_original(self, *args, **kwargs)
+    return envoltorio
 
 
 def _instalar_keepalive_turso():
     """turso_serverless.Session (la librería instalada, único release
-    disponible: 0.1.0) tiene dos problemas de rendimiento/robustez que se
+    disponible: 0.1.0) tiene tres problemas de rendimiento/robustez que se
     parchean acá porque no hay forma de arreglarlos sin editar
     site-packages (que se pisa en cada `pip install -r requirements.txt`):
 
@@ -48,7 +78,11 @@ def _instalar_keepalive_turso():
        execute_pipeline pueden llamarse entre sí en el mismo hilo, ej. en
        _refresh_autocommit) envuelve el método entero — desde que se lee
        el baton hasta que se actualiza con la respuesta — y no sólo la
-       llamada HTTP."""
+       llamada HTTP.
+
+    3. Un stream que Turso ya cerró por inactividad ("stream not found")
+       tumbaba toda la sesión del usuario en vez de reconectar sola — ver
+       _reintentar_stream_perdido arriba."""
     from turso_serverless.session import Session, ProtocolError
 
     def _post_keepalive(self, path, body):
@@ -115,8 +149,8 @@ def _instalar_keepalive_turso():
                 return metodo_original(self, *args, **kwargs)
         return envoltorio
 
-    Session.execute_stmt = _con_lock(Session.execute_stmt)
-    Session.execute_pipeline = _con_lock(Session.execute_pipeline)
+    Session.execute_stmt = _con_lock(_reintentar_stream_perdido(Session.execute_stmt))
+    Session.execute_pipeline = _con_lock(_reintentar_stream_perdido(Session.execute_pipeline))
 
 
 _instalar_keepalive_turso()
