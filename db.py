@@ -1,18 +1,112 @@
-"""Capa de acceso a datos (SQLite) para Skybridge ERP/CRM."""
+"""Capa de acceso a datos para Skybridge ERP/CRM.
+
+La base de datos vive en Turso (servicio de base de datos en la nube,
+compatible con SQLite vía SQL sobre HTTP) — no como archivo local. Así los
+datos sobreviven un reinicio o redeploy del hosting, que es justo lo que un
+archivo .db suelto en el disco NO garantiza en un plan gratuito."""
+import http.client
+import json
 import os
-import shutil
 import sqlite3
+import tempfile
+import threading
 from pathlib import Path
+from urllib.parse import urlsplit
 from datetime import datetime, timedelta
 
 import bcrypt
+import streamlit as st
+import turso_serverless
+
+
+def _instalar_keepalive_turso():
+    """turso_serverless.Session._post (la librería instalada, único release
+    disponible: 0.1.0) abre una conexión TCP+TLS NUEVA en cada consulta HTTP
+    (usa urllib.request.urlopen, que no reutiliza sockets) — aunque
+    get_connection() ya reutiliza el objeto de sesión por hilo, cada
+    SELECT/INSERT individual seguía pagando un handshake completo contra
+    Turso (~1-3s cada uno, medido), y una pantalla con 5-10 consultas se
+    sentía inusable (20-30s). Este parche reemplaza el transporte por una
+    conexión HTTP keep-alive por sesión, reconectando sola si el socket se
+    cae. No se edita site-packages directamente porque se pisa en cada
+    `pip install -r requirements.txt`."""
+    from turso_serverless.session import Session, ProtocolError
+
+    def _post_keepalive(self, path, body):
+        url = f"{self._base_url}{path}"
+        partes = urlsplit(url)
+        host, port = partes.hostname, partes.port or 443
+        datos = json.dumps(body, allow_nan=False).encode("utf-8")
+        cabeceras = self._headers()
+        cabeceras["Connection"] = "keep-alive"
+
+        def _intentar(conn):
+            conn.request("POST", partes.path or "/", body=datos, headers=cabeceras)
+            resp = conn.getresponse()
+            return resp, resp.read()
+
+        conn = getattr(self, "_http_conn", None)
+        if conn is None or getattr(self, "_http_conn_host", None) != (host, port):
+            conn = http.client.HTTPSConnection(host, port, timeout=30)
+            self._http_conn, self._http_conn_host = conn, (host, port)
+
+        try:
+            resp, crudo = _intentar(conn)
+        except (http.client.HTTPException, OSError):
+            # El socket reusado puede haber sido cerrado por el servidor
+            # (idle timeout) — se reintenta una vez con una conexión nueva.
+            try:
+                conn.close()
+            except Exception:
+                pass
+            conn = http.client.HTTPSConnection(host, port, timeout=30)
+            self._http_conn = conn
+            try:
+                resp, crudo = _intentar(conn)
+            except (http.client.HTTPException, OSError) as e:
+                self._reset_stream()
+                raise ProtocolError(f"request to {url} failed: {e!r}") from None
+
+        if resp.status >= 400:
+            self._reset_stream()
+            mensaje = None
+            try:
+                parseado = json.loads(crudo.decode("utf-8", errors="replace"))
+                if isinstance(parseado, dict):
+                    for clave in ("error", "message"):
+                        if isinstance(parseado.get(clave), str):
+                            mensaje = parseado[clave]
+                            break
+            except ValueError:
+                pass
+            if mensaje is not None:
+                raise ProtocolError(f"HTTP status {resp.status}: {mensaje}") from None
+            raise ProtocolError(f"HTTP status {resp.status}") from None
+        return crudo
+
+    Session._post = _post_keepalive
+
+
+_instalar_keepalive_turso()
+
+
+def _secreto(nombre: str):
+    """Busca primero en st.secrets (.streamlit/secrets.toml en local, panel
+    de Secrets en Streamlit Community Cloud) y si no está, en el entorno —
+    así funciona igual sin importar dónde corra la app."""
+    try:
+        if nombre in st.secrets:
+            return st.secrets[nombre]
+    except Exception:
+        pass
+    return os.environ.get(nombre)
+
+
+TURSO_DATABASE_URL = _secreto("TURSO_DATABASE_URL")
+TURSO_AUTH_TOKEN = _secreto("TURSO_AUTH_TOKEN")
 
 DATA_DIR = Path(os.environ.get("DATA_DIR", Path(__file__).parent))
-# En local ya existe (es la carpeta del proyecto); en un volumen de hosting
-# recién montado puede no existir todavía — sin esto, sqlite3.connect()
-# rompe en el primer arranque contra un DATA_DIR nuevo.
 DATA_DIR.mkdir(parents=True, exist_ok=True)
-DB_PATH = DATA_DIR / "skybridge.db"
 BACKUPS_DIR = DATA_DIR / "backups"
 MAX_BACKUPS = 30
 
@@ -215,14 +309,32 @@ DEFAULT_GASTOS = [
 ]
 
 
+_local = threading.local()
+
+
 def get_connection():
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA foreign_keys = ON")
+    """Cada función de este archivo hace get_connection() y al final
+    conn.close() — con Turso, abrir conexión nueva por cada consulta suma un
+    viaje de red (ida y vuelta a Virginia) por cada una, y una pantalla que
+    antes hacía 5-10 consultas locales instantáneas ahora se sentía lenta.
+    Para no tener que tocar las ~30 funciones de abajo, get_connection()
+    guarda UNA conexión por hilo (threading.local — cada usuario conectado a
+    la vez corre en su propio hilo dentro de Streamlit, así que no se
+    comparte entre usuarios) y la reutiliza en cada llamada dentro de esa
+    sesión; conn.close() queda anulado (no-op) así el código existente no se
+    entera del cambio. Con esto, sólo la primera consulta de cada sesión
+    paga el viaje de red de abrir conexión — el resto son mucho más rápidas."""
+    conn = getattr(_local, "conn", None)
+    if conn is None:
+        conn = turso_serverless.connect(TURSO_DATABASE_URL, auth_token=TURSO_AUTH_TOKEN)
+        conn.row_factory = turso_serverless.Row
+        conn.execute("PRAGMA foreign_keys = ON")
+        conn.close = lambda: None
+        _local.conn = conn
     return conn
 
 
-DBError = sqlite3.Error
+DBError = turso_serverless.Error
 
 
 def hay_usuarios():
@@ -305,21 +417,99 @@ def set_usuario_activo(usuario_id, activo):
     conn.close()
 
 
+def _nombres_tablas(conn) -> list[str]:
+    return [
+        r["name"] for r in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'"
+        ).fetchall()
+    ]
+
+
+def exportar_backup_sqlite() -> bytes:
+    """Arma un archivo .db (SQLite clásico) con el contenido ACTUAL de
+    Turso, tabla por tabla. El resultado es un archivo normal que se puede
+    abrir con cualquier visor de SQLite, y que restaurar_desde_sqlite_bytes()
+    sabe leer para restaurar — así el botón de backup y el de restaurar
+    siguen hablando el mismo formato de siempre."""
+    conn_turso = get_connection()
+    tablas = _nombres_tablas(conn_turso)
+    with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as tmp:
+        ruta_tmp = Path(tmp.name)
+    try:
+        conn_local = sqlite3.connect(ruta_tmp)
+        conn_local.row_factory = sqlite3.Row
+        conn_local.executescript(SCHEMA)
+        # SCHEMA por si sola no alcanza: las columnas agregadas después de la
+        # creación original de cada tabla (COLUMNAS_NUEVAS, vía ALTER TABLE en
+        # producción) no están ahí — sin este paso, el INSERT de abajo falla
+        # apenas Turso tiene una fila con alguna de esas columnas.
+        _migrar_columnas_faltantes(conn_local)
+        conn_local.commit()
+        for tabla in tablas:
+            filas = conn_turso.execute(f"SELECT * FROM {tabla}").fetchall()
+            if not filas:
+                continue
+            columnas = filas[0].keys()
+            placeholders = ",".join("?" for _ in columnas)
+            conn_local.executemany(
+                f"INSERT INTO {tabla} ({','.join(columnas)}) VALUES ({placeholders})",
+                [tuple(f[c] for c in columnas) for f in filas],
+            )
+        conn_local.commit()
+        conn_local.close()
+        conn_turso.close()
+        return ruta_tmp.read_bytes()
+    finally:
+        ruta_tmp.unlink(missing_ok=True)
+
+
+def restaurar_desde_sqlite_bytes(contenido: bytes):
+    """Reemplaza TODO el contenido de Turso por el de un archivo .db subido
+    (por ejemplo, un backup descargado antes, o la base real la primera
+    vez). Borra cada tabla y vuelve a insertar fila por fila. Se usa desde
+    el login inicial (primera carga, sin usuarios todavía) y desde
+    Configuración ▸ Restaurar backup."""
+    with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as tmp:
+        tmp.write(contenido)
+        ruta_tmp = Path(tmp.name)
+    try:
+        conn_local = sqlite3.connect(ruta_tmp)
+        conn_local.row_factory = sqlite3.Row
+        tablas = _nombres_tablas(conn_local)
+
+        conn_turso = get_connection()
+        conn_turso.execute("PRAGMA foreign_keys = OFF")
+        for tabla in tablas:
+            conn_turso.execute(f"DELETE FROM {tabla}")
+        for tabla in tablas:
+            filas = conn_local.execute(f"SELECT * FROM {tabla}").fetchall()
+            if not filas:
+                continue
+            columnas = filas[0].keys()
+            placeholders = ",".join("?" for _ in columnas)
+            for f in filas:
+                conn_turso.execute(
+                    f"INSERT INTO {tabla} ({','.join(columnas)}) VALUES ({placeholders})",
+                    tuple(f[c] for c in columnas),
+                )
+        conn_turso.commit()
+        conn_turso.execute("PRAGMA foreign_keys = ON")
+        conn_turso.close()
+        conn_local.close()
+    finally:
+        ruta_tmp.unlink(missing_ok=True)
+
+
 def backup_antes_de_borrar(motivo: str):
-    """Copia de seguridad de la base ANTES de una baja irreversible
-    (cotización, importación o cliente — lo que se lleva puestas
-    cotizaciones/importaciones reales no puede depender de un solo clic sin
-    red de contención). Nada de WAL acá (ver get_connection, sin
-    journal_mode configurado — modo rollback-journal por default), así que
-    una copia de archivo simple alcanza siempre que no haya una escritura en
-    curso, que es el caso: se llama ANTES de la propia operación de borrado.
-    Rota sola: conserva las últimas MAX_BACKUPS, borra el resto."""
-    if not DB_PATH.exists():
-        return
-    BACKUPS_DIR.mkdir(exist_ok=True)
+    """Snapshot de seguridad ANTES de una baja irreversible (cotización,
+    importación o cliente — lo real no puede depender de un solo clic sin
+    red de contención). Queda en disco local, útil dentro de la sesión
+    actual del servidor. Rota sola: conserva las últimas MAX_BACKUPS, borra
+    el resto."""
+    BACKUPS_DIR.mkdir(parents=True, exist_ok=True)
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     destino = BACKUPS_DIR / f"skybridge_{timestamp}_{motivo}.db"
-    shutil.copy2(DB_PATH, destino)
+    destino.write_bytes(exportar_backup_sqlite())
     backups = sorted(BACKUPS_DIR.glob("skybridge_*.db"), key=lambda p: p.stat().st_mtime)
     for viejo in backups[:-MAX_BACKUPS]:
         viejo.unlink()

@@ -36,6 +36,7 @@ starlette==1.6.0
 streamlit==1.62.0
 streamlit-pdf==2.0.1
 toml==0.10.2
+turso-serverless==0.1.0
 typing_extensions==4.16.0
 urllib3==2.7.0
 uvicorn==0.52.4

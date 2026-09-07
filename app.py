@@ -878,7 +878,7 @@ def _gate_login():
                             elif archivo is None:
                                 st.error("Subí el archivo primero.")
                             else:
-                                db.DB_PATH.write_bytes(archivo.getvalue())
+                                db.restaurar_desde_sqlite_bytes(archivo.getvalue())
                                 st.success("Base restaurada correctamente. Recargá la página para entrar.")
                                 st.stop()
                 else:
@@ -2802,14 +2802,12 @@ def _render_configuracion():
 
     st.divider()
     st.markdown("#### 💾 Backup")
-    if db.DB_PATH.exists():
-        with open(db.DB_PATH, "rb") as f:
-            st.download_button(
-                "⬇️ Descargar backup de la base ahora",
-                data=f.read(),
-                file_name=f"skybridge_backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.db",
-                mime="application/octet-stream",
-            )
+    st.download_button(
+        "⬇️ Descargar backup de la base ahora",
+        data=db.exportar_backup_sqlite(),
+        file_name=f"skybridge_backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.db",
+        mime="application/octet-stream",
+    )
 
     st.divider()
     st.markdown("#### ♻️ Restaurar backup")
@@ -2824,7 +2822,7 @@ def _render_configuracion():
                 st.error("Tenés que confirmar el checkbox antes de restaurar.")
             else:
                 db.backup_antes_de_borrar("restauracion_manual")
-                db.DB_PATH.write_bytes(archivo_restaurar.getvalue())
+                db.restaurar_desde_sqlite_bytes(archivo_restaurar.getvalue())
                 st.success("Base restaurada. La página se va a recargar.")
                 st.rerun()
 
