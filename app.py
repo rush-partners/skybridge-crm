@@ -5,6 +5,7 @@ replicando el motor de cálculo de 'Simulador Skybridge.xlsx'.
 """
 import html
 import math
+import os
 import re
 import uuid
 from datetime import date, datetime
@@ -864,7 +865,24 @@ def _gate_login():
         )
         with st.container(key="sb_login_card"):
             if not db.hay_usuarios():
-                st.warning("Todavía no hay usuarios creados. Corré `python seed_usuario.py` en la consola del servidor para dar de alta el primero.")
+                setup_token_real = os.environ.get("SETUP_TOKEN")
+                if setup_token_real:
+                    st.markdown("**Restaurar base de datos**")
+                    st.caption("Subí tu archivo skybridge.db y el código de configuración del servidor.")
+                    with st.form("form_restaurar_db"):
+                        archivo = st.file_uploader("Archivo skybridge.db", type=["db"])
+                        token_ingresado = st.text_input("Código de configuración", type="password")
+                        if st.form_submit_button("Restaurar", use_container_width=True):
+                            if token_ingresado != setup_token_real:
+                                st.error("Código incorrecto.")
+                            elif archivo is None:
+                                st.error("Subí el archivo primero.")
+                            else:
+                                db.DB_PATH.write_bytes(archivo.getvalue())
+                                st.success("Base restaurada correctamente. Recargá la página para entrar.")
+                                st.stop()
+                else:
+                    st.warning("Todavía no hay usuarios creados. Corré `python seed_usuario.py` en la consola del servidor para dar de alta el primero.")
             else:
                 st.markdown("**Iniciar sesión**")
                 with st.form("form_login"):
@@ -2792,6 +2810,23 @@ def _render_configuracion():
                 file_name=f"skybridge_backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.db",
                 mime="application/octet-stream",
             )
+
+    st.divider()
+    st.markdown("#### ♻️ Restaurar backup")
+    st.caption("Reemplaza la base de datos actual por un archivo .db subido acá. Esta acción no se puede deshacer.")
+    with st.form("form_restaurar_backup_config"):
+        archivo_restaurar = st.file_uploader("Archivo .db a restaurar", type=["db"], key="restaurar_backup_uploader")
+        confirmar_restaurar = st.checkbox("Entiendo que esto reemplaza todos los datos actuales")
+        if st.form_submit_button("Restaurar este backup"):
+            if not archivo_restaurar:
+                st.error("Subí un archivo primero.")
+            elif not confirmar_restaurar:
+                st.error("Tenés que confirmar el checkbox antes de restaurar.")
+            else:
+                db.backup_antes_de_borrar("restauracion_manual")
+                db.DB_PATH.write_bytes(archivo_restaurar.getvalue())
+                st.success("Base restaurada. La página se va a recargar.")
+                st.rerun()
 
 
 def vista_panel_control():
