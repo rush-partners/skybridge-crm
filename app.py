@@ -2331,6 +2331,24 @@ def _volver_a_historial():
     st.session_state.cotizador_modo = "historial"
 
 
+@st.cache_data(show_spinner=False)
+def _generar_pdfs_cotizacion_editor(cab_full: dict, resultado: dict):
+    """Mismo criterio que _generar_pdfs_cotizacion (arriba, para el
+    historial): acá en el editor en vivo todavía no hay un cot_id +
+    actualizado_en guardado en la base para usar de key (la cotización
+    puede estar a medio editar, sin guardar todavía), así que se cachea
+    directo por el contenido de cab_full/resultado — ninguno de los dos
+    cambia salvo que el usuario realmente edite algo, así que Streamlit
+    invalida el caché solo cuando corresponde. Antes esto regeneraba los 2
+    PDFs con reportlab en CADA rerun del editor — literalmente al tipear
+    cualquier carácter en cualquier campo — aunque el usuario ni tocara
+    los botones de descarga. NO recalcula nada de calculo.py: recibe el
+    resultado ya calculado y solo arma el PDF a partir de esos valores."""
+    pdf_simple = generar_pdf_cotizacion(cab_full, resultado, completo=False)
+    pdf_completo = generar_pdf_cotizacion(cab_full, resultado, completo=True)
+    return pdf_simple, pdf_completo
+
+
 def _render_cotizador_editor():
     clientes = db.list_clientes()
     mapa_clientes = {c["id"]: c["nombre"] for c in clientes}
@@ -2478,6 +2496,24 @@ def _render_cotizador_editor():
                 st.session_state[_gasto_key] = _valor_nuevo
     gastos_list = _a_fraccion(st.session_state.cot_gastos, PCT_GASTO_COLS)
     resultado = calculo.calcular(cab_calc, productos_list, gastos_list)
+
+    # ============================================================
+    # Resumen fijo arriba de todo: antes había que abrir las 10 secciones
+    # una por una hasta llegar a "9️⃣ Resultado" y "🔟 Simulación de venta"
+    # (al final del todo) para ver el número que en realidad importa. Estos
+    # 4 valores son EXACTAMENTE los mismos que van a aparecer más abajo en
+    # esas dos secciones — mismo diccionario "resultado", ningún cálculo
+    # nuevo — solo se muestran también acá arriba, sin obligar a abrir nada,
+    # a modo de vistazo rápido. Las secciones siguen abajo, colapsadas, para
+    # quien quiera revisar o editar el detalle de cada una.
+    # ============================================================
+    with st.container(border=True, key=f"resultgroup_resumentop_{cot_id}"):
+        st.markdown('<div class="sb-card-title">📊 Resumen de la cotización</div>', unsafe_allow_html=True)
+        r1, r2, r3, r4 = st.columns(4)
+        r1.metric("TOTAL desembolsado (c/IVA)", money(resultado["total_c_iva_usd"]))
+        r2.metric("Venta total estimada", money(resultado["venta_total_usd"]))
+        r3.metric("Ganancia bruta", money(resultado["ganancia_bruta_usd"]))
+        r4.metric("% Rentabilidad s/inversión", pct(resultado["rentabilidad_pct"]))
 
     # ============================================================
     # 2️⃣ Detalle de mercadería y precios
@@ -2688,8 +2724,10 @@ def _render_cotizador_editor():
     # Simplificado: solo página 1 (Resumen + Detalle de mercadería), para
     # mandarle al cliente sin exponer el desglose línea por línea de gastos.
     # Completo: página 1 + 2 (con el desglose), para uso interno.
-    pdf_simple = generar_pdf_cotizacion(cab_full, resultado, completo=False)
-    pdf_completo = generar_pdf_cotizacion(cab_full, resultado, completo=True)
+    # Cacheado (ver _generar_pdfs_cotizacion_editor arriba): antes se
+    # regeneraban los 2 PDFs en cada rerun del editor, no solo al guardar o
+    # descargar.
+    pdf_simple, pdf_completo = _generar_pdfs_cotizacion_editor(cab_full, resultado)
 
     nombre_pdf = _nombre_pdf_cotizacion(cab_full, resultado)
 
