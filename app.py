@@ -122,6 +122,15 @@ __SB_VARS__
             background: var(--sb-surface) !important; color: var(--sb-navy) !important;
             border-color: var(--sb-border) !important;
         }
+        /* El texto tipeado ya usa var(--sb-navy) de la regla de arriba, pero
+        el placeholder es un pseudo-elemento aparte con su propio color fijo
+        de Streamlit (#31333F al 60% — pensado para fondo claro): sobre la
+        superficie oscura quedaba casi del mismo tono que el fondo,
+        prácticamente invisible (buscadores, "Nombre de contacto", etc.). */
+        .stTextInput input::placeholder, .stNumberInput input::placeholder,
+        .stTextArea textarea::placeholder, [data-testid="stSelectbox"] input::placeholder {
+            color: var(--sb-text-secondary) !important; opacity: 1 !important;
+        }
         [data-testid="stSelectbox"] [role="group"] {
             background: var(--sb-surface) !important; border-color: var(--sb-border) !important;
         }
@@ -254,6 +263,19 @@ __SB_VARS__
         .sb-tagline {
             font-size: 11px; font-weight: 500; letter-spacing: 0.08em;
             text-transform: uppercase; color: var(--sb-text-secondary); margin-bottom: 1.25rem;
+        }
+
+        /* Usuario activo al pie del sidebar (fila compacta junto al botón
+        de cerrar sesión, ver más abajo el bloque que arma esa fila). */
+        .sb-sidebar-user {
+            font-size: 13px; font-weight: 600; color: var(--sb-navy);
+            overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+        }
+        /* El botón de logout es icon-only (sin label) — le bajamos el padding
+        horizontal para que no quede un rectángulo ancho vacío al lado del
+        ícono, y estrechamos su columna arriba en Python ([2.4, 1]). */
+        [class*="st-key-sidebar_logout"] button {
+            padding-left: 0 !important; padding-right: 0 !important;
         }
 
         /* Títulos de sección: acento naranja con más contraste (orange-dark)
@@ -4368,7 +4390,7 @@ def main():
 
     st.sidebar.markdown(
         '<div class="sb-logo">SKY<span>BRIDGE</span></div>'
-        '<div class="sb-tagline">ERP · Comercio Exterior</div>',
+        '<div class="sb-tagline">CRM COMEX</div>',
         unsafe_allow_html=True,
     )
     # El toggle en sí solo guarda el booleano en session_state — el cambio de
@@ -4376,11 +4398,6 @@ def main():
     # arriba del todo) leyendo ese mismo valor en el siguiente rerun, que
     # Streamlit dispara automáticamente al tocar el widget.
     st.sidebar.toggle("🌙 Modo oscuro", key="tema_oscuro")
-
-    st.sidebar.caption(f"👤 {st.session_state.usuario_autenticado['nombre']}")
-    if st.sidebar.button("Cerrar sesión", use_container_width=True):
-        st.session_state.usuario_autenticado = None
-        st.rerun()
 
     # Fijamos el valor por defecto ANTES de instanciar el widget (única forma
     # válida de asignarle un valor inicial): así, cuando un callback de otra
@@ -4390,6 +4407,24 @@ def main():
     pagina = st.sidebar.radio(
         "Navegación", PAGINAS, key="pagina_nav", on_change=_resetear_subpaginas,
     )
+
+    # Usuario + cerrar sesión al pie del sidebar, separados del menú por un
+    # divider — antes vivían arriba, entre el toggle de modo oscuro y el
+    # menú de navegación, compitiendo con la marca sin ser parte de la
+    # navegación en sí. Es el mismo lugar que usan la mayoría de las apps
+    # con sidebar (Slack, Notion, etc.): la cuenta activa al pie, separada
+    # del contenido. Fila compacta (nombre + ícono, no un botón de ancho
+    # completo con su propio caption arriba) para que no pese tanto como
+    # un ítem más del menú.
+    st.sidebar.divider()
+    col_user, col_logout = st.sidebar.columns([2.4, 1], vertical_alignment="center")
+    col_user.markdown(
+        f'<div class="sb-sidebar-user">👤 {html.escape(st.session_state.usuario_autenticado["nombre"])}</div>',
+        unsafe_allow_html=True,
+    )
+    if col_logout.button("", icon=":material/logout:", key="sidebar_logout", help="Cerrar sesión", use_container_width=True):
+        st.session_state.usuario_autenticado = None
+        st.rerun()
 
     _mostrar_flash()
 
