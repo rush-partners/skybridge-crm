@@ -19,3 +19,15 @@ font = "sans serif"
 
 [browser]
 gatherUsageStats = false
+
+# Oculta el menú "⋮" nativo de Streamlit (Rerun/Settings/Print/Record
+# screen/Clear cache) para quien esté viendo la app SIN ser el dueño/
+# colaborador logueado en Streamlit Cloud — que es como la va a ver
+# cualquier usuario real del CRM. El botón "Manage app" y los íconos
+# Share/★/lápiz/GitHub de arriba a la derecha NO son parte de la app (los
+# agrega Streamlit Community Cloud solo cuando quien mira está logueado
+# como dueño de la app) y no se pueden apagar desde acá — para verlos "como
+# los ve un usuario real" hay que abrir el link en una ventana de incógnito
+# o sin sesión iniciada en Streamlit Cloud.
+[client]
+toolbarMode = "minimal"

@@ -1741,15 +1741,20 @@ def _render_seccion_clientes_importaciones(
     """Pestaña 'Importaciones': clientes con al menos una importación
     realizada, en cualquier estado (incluidas ya entregadas) — la vista por
     default al entrar a Clientes."""
-    c1, c2 = st.columns([1, 1])
-    search = c1.text_input(
-        "Buscar por nombre / razón social", placeholder="Buscar por nombre / razón social...",
-        label_visibility="collapsed", key="clientes_search_imp",
-    )
-    rubro_producto = c2.text_input(
-        "Buscar por rubro o producto", placeholder="Buscar por rubro o producto...",
-        label_visibility="collapsed", key="clientes_rubro_imp",
-    )
+    # Buscador agrupado en su propia card ("formrow_"), mismo lenguaje que
+    # el filtro del historial del Cotizador — antes los 2 text_input
+    # quedaban sueltos, flotando sobre el fondo de la página sin ninguna
+    # superficie propia que los agrupe visualmente.
+    with st.container(border=True, key="formrow_clientes_filtros_imp"):
+        c1, c2 = st.columns([1, 1])
+        search = c1.text_input(
+            "Buscar por nombre / razón social", placeholder="Buscar por nombre / razón social...",
+            label_visibility="collapsed", key="clientes_search_imp",
+        )
+        rubro_producto = c2.text_input(
+            "Buscar por rubro o producto", placeholder="Buscar por rubro o producto...",
+            label_visibility="collapsed", key="clientes_rubro_imp",
+        )
 
     clientes = [c for c in todos_los_clientes if imp_por_cliente.get(c["id"], 0) > 0]
     if search:
@@ -1820,15 +1825,18 @@ def _render_seccion_clientes_cotizados(
     contando como una sola bolsa: "cotizado, todavía sin importación") con
     un cliente vinculado. En cuanto tienen una importación pasan a la
     pestaña 'Importaciones' y dejan de listarse acá (no se duplican)."""
-    c1, c2 = st.columns([1, 1])
-    search = c1.text_input(
-        "Buscar por nombre / razón social", placeholder="Buscar por nombre / razón social...",
-        label_visibility="collapsed", key="clientes_search_cot",
-    )
-    rubro_producto = c2.text_input(
-        "Buscar por rubro o producto", placeholder="Buscar por rubro o producto...",
-        label_visibility="collapsed", key="clientes_rubro_cot",
-    )
+    # Misma card "formrow_" que en la pestaña 'Importaciones' de acá al
+    # lado — ver el comentario en _render_seccion_clientes_importaciones.
+    with st.container(border=True, key="formrow_clientes_filtros_cot"):
+        c1, c2 = st.columns([1, 1])
+        search = c1.text_input(
+            "Buscar por nombre / razón social", placeholder="Buscar por nombre / razón social...",
+            label_visibility="collapsed", key="clientes_search_cot",
+        )
+        rubro_producto = c2.text_input(
+            "Buscar por rubro o producto", placeholder="Buscar por rubro o producto...",
+            label_visibility="collapsed", key="clientes_rubro_cot",
+        )
 
     contactos_cotizados = [
         c for c in db.list_contacts()
@@ -2689,12 +2697,16 @@ def _render_panel_cotizaciones():
 
     st.markdown("#### Seguimiento por estado")
     clientes_con_cot = sorted({c["cliente_nombre"] for c in cots_todas if c.get("cliente_nombre")})
-    c1, c2 = st.columns([2.3, 1.3])
-    busqueda = c1.text_input(
-        "🔎 Buscar por número o cliente", key="panel_busqueda_cot",
-        placeholder="Filtrar el tablero por número o cliente...",
-    )
-    cliente_filtro = c2.selectbox("Cliente", ["Todos"] + clientes_con_cot, key="panel_filtro_cliente_cot")
+    # Mismo lenguaje visual que el resto de los buscadores de la app
+    # (formrow_): antes el buscador + el selectbox de cliente quedaban
+    # sueltos arriba del tablero, sin ninguna card propia que los agrupe.
+    with st.container(border=True, key="formrow_panel_filtros_cot"):
+        c1, c2 = st.columns([2.3, 1.3])
+        busqueda = c1.text_input(
+            "🔎 Buscar por número o cliente", key="panel_busqueda_cot",
+            placeholder="Filtrar el tablero por número o cliente...",
+        )
+        cliente_filtro = c2.selectbox("Cliente", ["Todos"] + clientes_con_cot, key="panel_filtro_cliente_cot")
 
     cots = cots_todas
     if busqueda:
@@ -2772,19 +2784,26 @@ def _render_panel_importaciones():
     st.markdown("#### Seguimiento por estado")
     clientes_con_imp = sorted({i["cliente_nombre"] for i in imps_todas if i.get("cliente_nombre")})
 
-    c1, c2, c3 = st.columns([2.2, 1.3, 1.3])
-    busqueda = c1.text_input(
-        "🔎 Buscar por número, cliente o producto", key="panel_busqueda_imp",
-        placeholder="Filtrar el tablero por número, cliente o producto...",
-    )
-    cliente_filtro = c2.selectbox("Cliente", ["Todos"] + clientes_con_imp, key="panel_filtro_cliente_imp")
-    tipo_filtro = c3.selectbox("Tipo de envío", ["Todos"] + TIPOS_ENVIO, key="panel_filtro_tipo_imp")
+    # Los 6 filtros (buscador, 2 selects, 2 fechas, 1 checkbox) vivían
+    # sueltos en 2 filas de columnas, sin ninguna superficie propia que los
+    # agrupe — se leían como 6 controles desconectados flotando sobre el
+    # fondo de la página en vez de un único bloque de filtros, a diferencia
+    # del resto de los buscadores de la app (formrow_cotizador_filtros y
+    # los de Clientes). Misma card acá.
+    with st.container(border=True, key="formrow_panel_filtros_imp"):
+        c1, c2, c3 = st.columns([2.2, 1.3, 1.3])
+        busqueda = c1.text_input(
+            "🔎 Buscar por número, cliente o producto", key="panel_busqueda_imp",
+            placeholder="Filtrar el tablero por número, cliente o producto...",
+        )
+        cliente_filtro = c2.selectbox("Cliente", ["Todos"] + clientes_con_imp, key="panel_filtro_cliente_imp")
+        tipo_filtro = c3.selectbox("Tipo de envío", ["Todos"] + TIPOS_ENVIO, key="panel_filtro_tipo_imp")
 
-    c4, c5, c6 = st.columns([1.3, 1.3, 1.3])
-    fecha_desde = c4.date_input("ETA desde", value=None, key="panel_filtro_eta_desde", format="DD/MM/YYYY")
-    fecha_hasta = c5.date_input("ETA hasta", value=None, key="panel_filtro_eta_hasta", format="DD/MM/YYYY")
-    c6.write("")
-    ocultar_entregadas = c6.checkbox("Ocultar entregadas", key="panel_ocultar_entregadas")
+        c4, c5, c6 = st.columns([1.3, 1.3, 1.3])
+        fecha_desde = c4.date_input("ETA desde", value=None, key="panel_filtro_eta_desde", format="DD/MM/YYYY")
+        fecha_hasta = c5.date_input("ETA hasta", value=None, key="panel_filtro_eta_hasta", format="DD/MM/YYYY")
+        c6.write("")
+        ocultar_entregadas = c6.checkbox("Ocultar entregadas", key="panel_ocultar_entregadas")
 
     imps = imps_todas
     if busqueda:
