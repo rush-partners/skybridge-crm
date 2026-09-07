@@ -1432,12 +1432,12 @@ def _render_ficha_importacion_cliente(imp):
     icono = ICONO_TIPO_ENVIO.get(imp.get("tipo_envio"), "")
     st.subheader(f"{icono + ' ' if icono else ''}{imp['numero']} — {cliente['nombre'] if cliente else 'sin cliente'}")
 
-    cotizaciones_cliente = [c for c in db.list_cotizaciones() if c["cliente_id"] == imp["cliente_id"]]
+    cotizaciones_cliente = db.list_cotizaciones(cliente_id=imp["cliente_id"])
     _render_contenido_importacion(imp, cotizaciones_cliente)
 
 
 def _render_importaciones_cliente(cliente_id):
-    cotizaciones_cliente = [c for c in db.list_cotizaciones() if c["cliente_id"] == cliente_id]
+    cotizaciones_cliente = db.list_cotizaciones(cliente_id=cliente_id)
     importaciones = db.list_importaciones(cliente_id)
 
     if not importaciones:
@@ -2662,7 +2662,7 @@ def _render_panel_importaciones():
         )
         cliente = db.get_cliente(imp["cliente_id"])
         st.subheader(f"{imp['numero']} — {cliente['nombre'] if cliente else 'sin cliente'}")
-        cotizaciones_cliente = [c for c in db.list_cotizaciones() if c["cliente_id"] == imp["cliente_id"]]
+        cotizaciones_cliente = db.list_cotizaciones(cliente_id=imp["cliente_id"])
         _render_contenido_importacion(imp, cotizaciones_cliente)
         return
 
@@ -2811,12 +2811,25 @@ def _render_configuracion():
 
     st.divider()
     st.markdown("#### 💾 Backup")
-    st.download_button(
-        "⬇️ Descargar backup de la base ahora",
-        data=db.exportar_backup_sqlite(),
-        file_name=f"skybridge_backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.db",
-        mime="application/octet-stream",
-    )
+    # exportar_backup_sqlite() hace un SELECT * por cada tabla de la base
+    # (11 en total) — con Turso eso tarda ~3s. st.download_button necesita
+    # los bytes YA armados para poder dibujarse, así que antes corría en
+    # CADA render de Configuración (y como st.tabs ejecuta las 3 pestañas
+    # siempre, eso eran ~3s de más en CADA carga del Panel de Control,
+    # aunque nadie tocara este botón). Separarlo en dos pasos — preparar,
+    # después descargar — hace que esas 11 consultas corran solo cuando de
+    # verdad se van a usar.
+    if st.button("📦 Preparar backup para descargar"):
+        with st.spinner("Armando el backup..."):
+            st.session_state["_backup_bytes"] = db.exportar_backup_sqlite()
+            st.session_state["_backup_nombre"] = f"skybridge_backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.db"
+    if "_backup_bytes" in st.session_state:
+        st.download_button(
+            "⬇️ Descargar backup de la base",
+            data=st.session_state["_backup_bytes"],
+            file_name=st.session_state["_backup_nombre"],
+            mime="application/octet-stream",
+        )
 
     st.divider()
     st.markdown("#### ♻️ Restaurar backup")
