@@ -341,7 +341,7 @@ DEFAULT_GASTOS = [
 ]
 
 
-_TIMEOUT_LOCK_CONEXION = 15
+_TIMEOUT_LOCK_CONEXION = 5
 
 
 def get_connection():
@@ -606,6 +606,17 @@ COLUMNAS_NUEVAS = {
     "usuarios": {
         "intentos_fallidos": "INTEGER DEFAULT 0",
         "bloqueado_hasta": "TEXT",
+    },
+    "importacion_documentos": {
+        # El archivo en sí, no solo su nombre — antes vivía en disco local
+        # (ruta_archivo apuntaba ahí), pero eso se pierde en cada redeploy
+        # del hosting (filesystem efímero). Guardarlo acá adentro hace que
+        # viaje junto con el resto de los datos, igual que ya pasa con
+        # todo lo demás desde la migración a Turso.
+        "contenido": "BLOB",
+    },
+    "cliente_documentos": {
+        "contenido": "BLOB",
     },
 }
 
@@ -1027,15 +1038,30 @@ def delete_importacion(imp_id):
     conn.close()
 
 
-def add_documento(importacion_id, categoria, nombre_archivo, ruta_archivo):
+def add_documento(importacion_id, categoria, nombre_archivo, contenido: bytes):
+    # ruta_archivo ya no se usa para ubicar el archivo (eso ahora es
+    # 'contenido', ver COLUMNAS_NUEVAS) — se sigue completando solo porque
+    # la columna es NOT NULL desde la versión vieja del schema.
     conn = get_connection()
     conn.execute(
-        """INSERT INTO importacion_documentos (importacion_id, categoria, nombre_archivo, ruta_archivo)
-           VALUES (?,?,?,?)""",
-        (importacion_id, categoria, nombre_archivo, ruta_archivo),
+        """INSERT INTO importacion_documentos (importacion_id, categoria, nombre_archivo, ruta_archivo, contenido)
+           VALUES (?,?,?,?,?)""",
+        (importacion_id, categoria, nombre_archivo, nombre_archivo, contenido),
     )
     conn.commit()
     conn.close()
+
+
+def contar_documentos(importacion_id):
+    """COUNT liviano (sin traer 'contenido') — para mostrar cuántos
+    documentos tiene una importación sin pagar el costo de bajar todos los
+    archivos, como pasaría con list_documentos()."""
+    conn = get_connection()
+    row = conn.execute(
+        "SELECT COUNT(*) AS n FROM importacion_documentos WHERE importacion_id=?", (importacion_id,)
+    ).fetchone()
+    conn.close()
+    return row["n"] if row else 0
 
 
 def list_documentos(importacion_id, categoria=None):
@@ -1068,9 +1094,9 @@ def delete_documento(doc_id):
 
 
 def rename_documento(doc_id, nuevo_nombre):
-    # Solo cambia el nombre "de vidriera" (nombre_archivo) — el archivo en
-    # disco sigue en la misma ruta_archivo, así que no hay ningún I/O que
-    # hacer acá aparte del UPDATE.
+    # Solo cambia el nombre "de vidriera" (nombre_archivo) — el contenido
+    # (columna 'contenido') no se toca, así que no hay ningún I/O aparte
+    # del UPDATE.
     conn = get_connection()
     conn.execute("UPDATE importacion_documentos SET nombre_archivo=? WHERE id=?", (nuevo_nombre, doc_id))
     conn.commit()
@@ -1079,12 +1105,21 @@ def rename_documento(doc_id, nuevo_nombre):
 
 # ---------- Documentos de cliente ----------
 
-def add_documento_cliente(cliente_id, nombre_archivo, ruta_archivo, tamano_bytes=0):
+def contar_documentos_cliente(cliente_id):
+    conn = get_connection()
+    row = conn.execute(
+        "SELECT COUNT(*) AS n FROM cliente_documentos WHERE cliente_id=?", (cliente_id,)
+    ).fetchone()
+    conn.close()
+    return row["n"] if row else 0
+
+
+def add_documento_cliente(cliente_id, nombre_archivo, contenido: bytes, tamano_bytes=0):
     conn = get_connection()
     conn.execute(
-        """INSERT INTO cliente_documentos (cliente_id, nombre_archivo, ruta_archivo, tamano_bytes)
-           VALUES (?,?,?,?)""",
-        (cliente_id, nombre_archivo, ruta_archivo, tamano_bytes),
+        """INSERT INTO cliente_documentos (cliente_id, nombre_archivo, ruta_archivo, tamano_bytes, contenido)
+           VALUES (?,?,?,?,?)""",
+        (cliente_id, nombre_archivo, nombre_archivo, tamano_bytes, contenido),
     )
     conn.commit()
     conn.close()

@@ -962,22 +962,18 @@ ICONO_TIPO_ENVIO = {"Envío aéreo": "✈️", "Envío marítimo": "🚢"}
 
 def _guardar_archivos_subidos(imp_id, categoria, archivos):
     for f in archivos:
-        ruta = storage.guardar_archivo(imp_id, categoria, f.name, f.getvalue())
-        db.add_documento(imp_id, categoria, f.name, ruta)
+        db.add_documento(imp_id, categoria, f.name, f.getvalue())
 
 
 def _eliminar_documento(doc_id):
-    doc = db.get_documento(doc_id)
-    if doc:
-        storage.eliminar_archivo(doc["ruta_archivo"])
-        db.delete_documento(doc_id)
+    # El contenido vive en la misma fila (columna 'contenido' en Turso), no
+    # en disco — borrar la fila alcanza, no hay ningún archivo aparte que
+    # limpiar.
+    db.delete_documento(doc_id)
 
 
 def _eliminar_documento_cliente(doc_id):
-    doc = db.get_documento_cliente(doc_id)
-    if doc:
-        storage.eliminar_archivo(doc["ruta_archivo"])
-        db.delete_documento_cliente(doc_id)
+    db.delete_documento_cliente(doc_id)
 
 
 @st.dialog("Eliminar documento")
@@ -1020,8 +1016,6 @@ def _dialog_eliminar_importacion(imp_id, numero):
     if c2.button("Sí, eliminar", type="primary", use_container_width=True, key=f"confirmimpdel_{imp_id}"):
         try:
             db.backup_antes_de_borrar("importacion")
-            for d in db.list_documentos(imp_id):
-                storage.eliminar_archivo(d["ruta_archivo"])
             db.delete_importacion(imp_id)
             _flash("Importación eliminada.", icon="🗑️")
         except db.DBError as e:
@@ -1034,18 +1028,17 @@ def _dialog_eliminar_cliente(cliente_id, nombre):
     # cliente_id en importaciones/cotizaciones/contacts tiene ON DELETE
     # CASCADE/SET NULL en el schema (ver db.py) con foreign_keys=ON: al
     # borrar el cliente, SQLite se encarga solo de las importaciones
-    # (CASCADE, se van), las cotizaciones (SET NULL, quedan pero sin
-    # cliente) y el contacto de CRM vinculado (SET NULL, queda pero
-    # desvinculado) — acá solo hace falta borrar del disco los archivos de
-    # esas importaciones/documentos ANTES, porque el cascade solo borra
-    # filas de la base, nunca el archivo físico.
+    # (CASCADE, se van, documentos incluidos) y las cotizaciones/contacto
+    # vinculado (SET NULL, quedan pero desvinculados) — el contenido de los
+    # documentos vive en la misma fila de la base (no en disco), así que el
+    # cascade alcanza y no hace falta limpiar nada aparte.
     importaciones_cli = db.list_importaciones(cliente_id)
-    docs_cliente = db.list_documentos_cliente(cliente_id)
-    total_docs_imp = sum(len(db.list_documentos(imp["id"])) for imp in importaciones_cli)
+    total_docs_imp = sum(db.contar_documentos(imp["id"]) for imp in importaciones_cli)
+    total_docs_cliente = db.contar_documentos_cliente(cliente_id)
     st.warning(
         f"¿Confirmás eliminar **{nombre}**? Esta acción no se puede deshacer, y también elimina "
         f"de forma permanente sus {len(importaciones_cli)} importación(es) y "
-        f"{total_docs_imp + len(docs_cliente)} documento(s) asociados.\n\n"
+        f"{total_docs_imp + total_docs_cliente} documento(s) asociados.\n\n"
         "Las cotizaciones ya hechas para este cliente **no** se borran, pero quedan sin cliente "
         "vinculado. Si tiene un contacto de CRM vinculado, tampoco se borra: solo queda "
         "desvinculado del cliente."
@@ -1056,11 +1049,6 @@ def _dialog_eliminar_cliente(cliente_id, nombre):
     if c2.button("Sí, eliminar", type="primary", use_container_width=True, key=f"confirmclidel_{cliente_id}"):
         try:
             db.backup_antes_de_borrar("cliente")
-            for imp in importaciones_cli:
-                for d in db.list_documentos(imp["id"]):
-                    storage.eliminar_archivo(d["ruta_archivo"])
-            for d in docs_cliente:
-                storage.eliminar_archivo(d["ruta_archivo"])
             db.delete_cliente(cliente_id)
             st.session_state.cliente_seleccionado = None
             _flash(f"Cliente '{nombre}' eliminado.", icon="🗑️")
@@ -1099,7 +1087,7 @@ def _render_documentos_cliente(cliente_id):
                     else:
                         st.error("El nombre no puede quedar vacío.")
             c5.download_button(
-                "Descargar", data=storage.leer_archivo(d["ruta_archivo"]),
+                "Descargar", data=d["contenido"] or b"",
                 file_name=d["nombre_archivo"], key=f"dlcliedoc_{d['id']}", use_container_width=True,
             )
             if c6.button("🗑️ Eliminar", key=f"delcliedoc_{d['id']}", use_container_width=True):
@@ -1116,8 +1104,7 @@ def _render_documentos_cliente(cliente_id):
     if subidos:
         for f in subidos:
             contenido = f.getvalue()
-            ruta = storage.guardar_archivo_cliente(cliente_id, f.name, contenido)
-            db.add_documento_cliente(cliente_id, f.name, ruta, len(contenido))
+            db.add_documento_cliente(cliente_id, f.name, contenido, len(contenido))
         st.session_state[contador_key] = contador + 1
         st.rerun()
 
@@ -1160,7 +1147,7 @@ def _render_documentos_categoria(imp_id, categoria):
     docs = db.list_documentos(imp_id, categoria)
     if docs:
         for d in docs:
-            contenido = storage.leer_archivo(d["ruta_archivo"])
+            contenido = d["contenido"] or b""
             es_pdf = d["nombre_archivo"].lower().endswith(".pdf")
             es_excel = d["nombre_archivo"].lower().endswith((".xlsx", ".xls"))
             c1, c2, c3, c4, c5 = st.columns([2.7, 0.5, 1.1, 1.3, 0.5])
@@ -1185,8 +1172,7 @@ def _render_documentos_categoria(imp_id, categoria):
                     pdf_bytes = storage.convertir_a_pdf(contenido, d["nombre_archivo"])
                 if pdf_bytes:
                     nombre_pdf = f"{d['nombre_archivo'].rsplit('.', 1)[0]} (convertido).pdf"
-                    ruta_pdf = storage.guardar_archivo(imp_id, categoria, nombre_pdf, pdf_bytes)
-                    db.add_documento(imp_id, categoria, nombre_pdf, ruta_pdf)
+                    db.add_documento(imp_id, categoria, nombre_pdf, pdf_bytes)
                     st.rerun()
                 else:
                     st.error("No se pudo convertir el archivo a PDF. Verificá que LibreOffice esté instalado en el servidor.")

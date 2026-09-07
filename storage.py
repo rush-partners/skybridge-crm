@@ -1,20 +1,20 @@
-"""Almacenamiento en disco de los archivos adjuntos de una importación
-(despacho, invoices, packing list, documentación de carga, facturas de pago)."""
-import os
-import re
+"""Conversión de archivos adjuntos de una importación (despacho, invoices,
+packing list, documentación de carga, facturas de pago) a PDF.
+
+El guardado en sí (subir/leer/borrar) ya NO pasa por acá ni por disco: los
+archivos se guardan como contenido directamente en Turso (ver
+db.add_documento / db.add_documento_cliente), para que viajen junto con el
+resto de los datos y no se pierdan en cada redeploy del hosting — antes
+vivían sueltos en disco local, que es justo lo que un hosting sin volumen
+persistente NO garantiza."""
 import subprocess
 import tempfile
 import threading
-import uuid
 from pathlib import Path
 
 import openpyxl
 from openpyxl.utils import get_column_letter
 from openpyxl.worksheet.properties import PageSetupProperties
-
-DATA_DIR = Path(os.environ.get("DATA_DIR", Path(__file__).parent))
-UPLOADS_DIR = DATA_DIR / "uploads"
-ARCHIVOS_CLIENTES_DIR = DATA_DIR / "archivos_clientes"
 
 # soffice headless no tolera bien dos conversiones en paralelo sobre el mismo
 # perfil de usuario (colisiona el lock del perfil) — un lock de proceso
@@ -90,34 +90,3 @@ def convertir_a_pdf(contenido: bytes, nombre_original: str) -> bytes | None:
         return salida.read_bytes() if salida.exists() else None
 
 
-def _slug(texto: str) -> str:
-    return re.sub(r"[^a-zA-Z0-9._-]+", "_", texto).strip("_") or "archivo"
-
-
-def guardar_archivo(importacion_id: int, categoria: str, nombre_original: str, contenido: bytes) -> str:
-    carpeta = UPLOADS_DIR / f"importacion_{importacion_id}" / _slug(categoria)
-    carpeta.mkdir(parents=True, exist_ok=True)
-    nombre_seguro = f"{uuid.uuid4().hex[:8]}_{_slug(nombre_original)}"
-    ruta = carpeta / nombre_seguro
-    ruta.write_bytes(contenido)
-    return str(ruta)
-
-
-def guardar_archivo_cliente(cliente_id: int, nombre_original: str, contenido: bytes) -> str:
-    carpeta = ARCHIVOS_CLIENTES_DIR / str(cliente_id)
-    carpeta.mkdir(parents=True, exist_ok=True)
-    nombre_seguro = f"{uuid.uuid4().hex[:8]}_{_slug(nombre_original)}"
-    ruta = carpeta / nombre_seguro
-    ruta.write_bytes(contenido)
-    return str(ruta)
-
-
-def eliminar_archivo(ruta: str):
-    p = Path(ruta)
-    if p.exists():
-        p.unlink()
-
-
-def leer_archivo(ruta: str) -> bytes:
-    p = Path(ruta)
-    return p.read_bytes() if p.exists() else b""
