@@ -7,8 +7,9 @@ import html
 import math
 import os
 import re
+import secrets
 import uuid
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from urllib.parse import quote
 
 import pandas as pd
@@ -1289,6 +1290,39 @@ def pct(v):
         return "0.00%"
 
 
+# Token de sesión → usuario, en memoria del proceso (no en session_state:
+# eso se resetea con cada F5, es justo lo que este mecanismo evita). Streamlit
+# vuelve a ejecutar TODO el script de punta a punta en cada rerun, así que un
+# simple `= {}` a nivel de módulo se reinicializaría (perdería todos los
+# tokens) en cada click, no solo al reiniciar el server — por eso el diccionario
+# vive adentro de un @st.cache_resource: ese sí se crea una sola vez y
+# persiste mientras el servidor siga corriendo, compartido por todas las
+# sesiones/usuarios del proceso. Sobrevive a un refresco de página, no a un
+# redeploy/reinicio del server — ahí sí hay que volver a loguearse una vez
+# (igual que pasaba siempre antes de esto).
+_SESION_DURACION = timedelta(days=30)
+
+
+@st.cache_resource
+def _sesiones_activas():
+    return {}
+
+
+def _restaurar_sesion_desde_token():
+    """Si la URL trae ?sesion=<token> de un login previo válido, restaura
+    usuario_autenticado sin pedir usuario/contraseña de nuevo. Se llama
+    antes de decidir si mostrar el formulario de login."""
+    token = st.query_params.get("sesion")
+    if not token:
+        return
+    sesiones = _sesiones_activas()
+    sesion = sesiones.get(token)
+    if not sesion or sesion["expira"] < datetime.now():
+        sesiones.pop(token, None)
+        return
+    st.session_state.usuario_autenticado = sesion["usuario"]
+
+
 def _gate_login():
     """Corre como primer paso de main(): si no hay sesión iniciada, muestra
     el login, centrado y con la misma identidad visual del resto de la
@@ -1296,6 +1330,8 @@ def _gate_login():
     crear cuentas acá — eso es exclusivo de seed_usuario.py (por
     consola) para el primer usuario, y de Configuración (ya logueado)
     para los siguientes."""
+    if not st.session_state.get("usuario_autenticado"):
+        _restaurar_sesion_desde_token()
     if st.session_state.get("usuario_autenticado"):
         return
 
@@ -1336,7 +1372,12 @@ def _gate_login():
                     if st.form_submit_button("Ingresar", use_container_width=True):
                         usuario, error = db.verificar_login(username, password)
                         if usuario:
+                            token = secrets.token_urlsafe(32)
+                            _sesiones_activas()[token] = {
+                                "usuario": usuario, "expira": datetime.now() + _SESION_DURACION,
+                            }
                             st.session_state.usuario_autenticado = usuario
+                            st.query_params["sesion"] = token
                             st.rerun()
                         else:
                             st.error(error)
@@ -2803,7 +2844,7 @@ def _render_cotizador_editor():
 
     tab_datos, tab_productos, tab_tarifas, tab_costos_op, tab_memoria, tab_simulacion = st.tabs(
         [label_datos, label_productos, label_tarifas, label_costos_op, label_memoria, label_simulacion],
-        default=label_productos, key=f"cot_tabs_{cot_id}",
+        default=label_datos, key=f"cot_tabs_{cot_id}",
     )
 
     # ============================================================
@@ -4934,6 +4975,9 @@ def main():
             "", icon=":material/logout:", key="sidebar_logout",
             help="Cerrar sesión", use_container_width=True,
         ):
+            _sesiones_activas().pop(st.query_params.get("sesion"), None)
+            if "sesion" in st.query_params:
+                del st.query_params["sesion"]
             st.session_state.usuario_autenticado = None
             st.rerun()
 
