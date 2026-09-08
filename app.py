@@ -2977,15 +2977,18 @@ def _render_cotizador_editor():
             disabled=True, key=tarifafletecert_key, help="= Tarifa flete × % Certificación. Se usa en el CIF.",
         )
 
-        # Gastos en origen y Seguro comparten la columna tf4: antes Seguro
-        # tenía su propia 3ra columna (selectbox + a veces el monto manual +
-        # el resultado automático, 2-3 campos apilados) y quedaba mucho más
-        # alta que "Gastos en origen"/"Gastos locales" (1 solo campo cada
-        # una), dejando un hueco vacío al lado. Pedido explícito: "el
-        # espacio para seguro podría estar debajo de gastos en origen, hay
-        # un espacio libre" — se apila Seguro debajo de Gastos en origen, en
-        # la misma columna, y la fila pasa de 3 a 2 columnas.
-        tf4, tf5 = st.columns(2)
+        # Dos columnas por TEMA, no por orden de carga: "Gastos" (en origen +
+        # locales + su IVA) a la izquierda, "Seguro" (modo + monto manual +
+        # resultado + su IVA) a la derecha — cada columna cuenta una sola
+        # historia completa de punta a punta, incluido su propio % de IVA al
+        # final, así ninguna se queda con un hueco vacío esperando a la otra
+        # (que fue lo que pasó apilando Seguro debajo de Gastos en origen:
+        # esa columna quedaba más alta y la de Gastos locales, con un solo
+        # campo, dejaba un vacío grande al lado — mismo problema, columna
+        # distinta). Antes el % de IVA de cada uno vivía en una fila aparte,
+        # más abajo, sin conexión visual con su propio campo.
+        tf_gastos, tf_seguro = st.columns(2)
+
         if contenedor in ("FOB", "FCA"):
             # No se cobran gastos en origen con estas dos condiciones (el
             # exportador ya los cubre hasta el puerto de origen) — forzado a
@@ -2994,50 +2997,48 @@ def _render_cotizador_editor():
             # no relee su value= solo, hay que pisar session_state a mano).
             gastos_origen = 0.0
             st.session_state[gastosorigen_key] = 0.0
-            tf4.number_input(
+            tf_gastos.number_input(
                 "Gastos en origen (USD)", value=0.0, format="%.2f", disabled=True, key=gastosorigen_key,
                 help="Gastos EXW / en el país de origen (handling, documentación, etc.).",
             )
-            tf4.caption("No aplica con FOB/FCA — el exportador ya cubre los gastos hasta el puerto de origen.")
+            tf_gastos.caption("No aplica con FOB/FCA — el exportador ya cubre los gastos hasta el puerto de origen.")
         else:
-            gastos_origen = tf4.number_input(
+            gastos_origen = tf_gastos.number_input(
                 "Gastos en origen (USD)", value=gastos_origen, format="%.2f", step=10.0, key=gastosorigen_key,
                 help="Gastos EXW / en el país de origen (handling, documentación, etc.).",
             )
             if gastos_origen == 0:
-                tf4.caption("⚠️ Sin cargar")
-        gastos_locales_hdr = tf5.number_input(
+                tf_gastos.caption("⚠️ Sin cargar")
+        gastos_locales_hdr = tf_gastos.number_input(
             "Gastos locales (USD)", value=gastos_locales_hdr, format="%.2f", step=10.0, key=gastoslocaleshdr_key,
             help="Gastos locales en Argentina asociados al despacho.",
         )
         if gastos_locales_hdr == 0:
-            tf5.caption("⚠️ Sin cargar")
+            tf_gastos.caption("⚠️ Sin cargar")
+        # Gastos en origen no paga IVA, no hace falta editarlo — Gastos
+        # locales sí, así que su % IVA (crédito fiscal recuperable) cierra
+        # esta columna, junto a los montos que le dan origen.
+        pct_iva_gastoslocales_input = tf_gastos.number_input(
+            "IVA Gastos locales (%)", value=pct_iva_gastoslocales_input, format="%.2f", step=1.0,
+            key=pctivagastoslocales_key, help="% de IVA incluido en Gastos locales — crédito fiscal recuperable.",
+        )
 
-        seguro_modo_ui = tf4.selectbox(
+        seguro_modo_ui = tf_seguro.selectbox(
             "Seguro", list(SEGURO_MODO_UI_A_DB), key=segmodo_key,
             help="Automático: 0,3% s/FOB declarado con piso USD 75. No cobrar / Manual, a elección.",
         )
         seguro_modo = SEGURO_MODO_UI_A_DB.get(seguro_modo_ui, "auto")
         if seguro_modo == "manual":
-            seguro_manual_usd = tf4.number_input(
+            seguro_manual_usd = tf_seguro.number_input(
                 "Seguro manual (USD)", value=seguro_manual_usd, format="%.2f", step=10.0, key=segmanual_key,
             )
         segurohdr_key = f"segurohdr_{cot_id}"
         st.session_state[segurohdr_key] = resultado["seguro_declarado"]
-        tf4.number_input(
+        tf_seguro.number_input(
             "Seguro (USD)", value=resultado["seguro_declarado"], format="%.2f", disabled=True,
             key=segurohdr_key, help="= FOB total × Seguro (%) s/FOB, cargado en Datos generales.",
         )
-
-        # Gastos en origen y Flete no pagan IVA, no hace falta editarlo — Gastos
-        # locales y Seguro sí, así que su % IVA (crédito fiscal recuperable) se
-        # edita acá en vez de en Costos operativos, donde ya no aparecen.
-        tf8, tf9 = st.columns(2)
-        pct_iva_gastoslocales_input = tf8.number_input(
-            "IVA Gastos locales (%)", value=pct_iva_gastoslocales_input, format="%.2f", step=1.0,
-            key=pctivagastoslocales_key, help="% de IVA incluido en Gastos locales — crédito fiscal recuperable.",
-        )
-        pct_iva_seguro_input = tf9.number_input(
+        pct_iva_seguro_input = tf_seguro.number_input(
             "IVA Seguro (%)", value=pct_iva_seguro_input, format="%.2f", step=1.0,
             key=pctivaseguro_key, help="% de IVA incluido en el Seguro — crédito fiscal recuperable.",
         )
