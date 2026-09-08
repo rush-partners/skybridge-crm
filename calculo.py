@@ -31,12 +31,21 @@ def calcular(cabecera: dict, productos_in: list, gastos_in: list) -> dict:
 
     tc_trib = _f(cab.get("tc_tributos"))
     tc_oper = _f(cab.get("tc_operativos"))
-    tc_venta = tc_oper  # TC Venta ARS se eliminó del formulario: se reutiliza TC Operativos.
+    tc_venta = _f(cab.get("tc_venta"))  # tasa propia, usada solo en Simulación de venta (ver Costeo!B40)
     cf_pct = _f(cab.get("costo_financiero_pct"), 0.025)
     seguro_pct = _f(cab.get("seguro_pct"), 0.003)
+    seguro_modo = cab.get("seguro_modo") or "auto"
+    seguro_manual_usd = _f(cab.get("seguro_manual_usd"))
     arancel_sim = _f(cab.get("arancel_sim"), 10)
     tarifa_flete = _f(cab.get("tarifa_flete"))
     pct_certificacion = _f(cab.get("pct_certificacion"), 0.5)
+    # Con FOB/FCA el exportador ya cubre los gastos hasta el puerto de
+    # origen — no se cobran, y por lo tanto no entran a la base del CIF
+    # Declarado. Con EXW sí corren por cuenta propia, y entran a esa base
+    # (junto con FOB + flete + seguro declarados), igual que el Excel.
+    gastos_origen = _f(cab.get("gastos_origen"))
+    condicion_venta = cab.get("condicion_venta") or ""
+    gastos_origen_taxable = gastos_origen if condicion_venta == "EXW" else 0.0
 
     for p in productos:
         p["fob_unit"] = _f(p.get("fob_unit"))
@@ -112,13 +121,18 @@ def calcular(cabecera: dict, productos_in: list, gastos_in: list) -> dict:
     # USD 75 (piso habitual de póliza), salvo que no haya mercadería
     # cargada todavía (fob_declarado=0), donde no corresponde cobrar nada.
     SEGURO_MINIMO_USD = 75.0
-    seguro_declarado = max(fob_declarado * seguro_pct, SEGURO_MINIMO_USD) if fob_declarado > 0 else 0.0  # B40
-    cif_declarado = fob_declarado + flete_declarado + seguro_declarado  # B41
+    if seguro_modo == "ninguno":
+        seguro_declarado = 0.0
+    elif seguro_modo == "manual":
+        seguro_declarado = seguro_manual_usd
+    else:  # "auto" — misma fórmula de siempre, sin tocar
+        seguro_declarado = max(fob_declarado * seguro_pct, SEGURO_MINIMO_USD) if fob_declarado > 0 else 0.0  # B40
+    cif_declarado = fob_declarado + flete_declarado + seguro_declarado + gastos_origen_taxable  # B41
 
     # ---- Derechos, tasas y antidumping por producto ----
     subtotal_der = subtotal_tasa = subtotal_antid = subtotal_dertasas = 0.0
     for p in productos:
-        cif_prod = p["fob_decl_total"] + (flete_declarado + seguro_declarado) * p["pct_partic"]  # B45
+        cif_prod = p["fob_decl_total"] + (flete_declarado + seguro_declarado + gastos_origen_taxable) * p["pct_partic"]  # B45
         derechos = cif_prod * p["pct_derechos"]
         tasa = cif_prod * p["pct_tasa_estadistica"]
         antid = cif_prod * p["pct_antidumping"]
@@ -228,24 +242,40 @@ def calcular(cabecera: dict, productos_in: list, gastos_in: list) -> dict:
 
         pv_sugerido = costo_civa_unit * (1 + p["margen_pct"])
         pv_final = p["pv_final_usd"]
+        pv_mercado = p["pv_mercado_usd"]
         margen_real = ((pv_final - costo_civa_unit) / costo_civa_unit) if (costo_civa_unit > 0 and pv_final > 0) else 0.0
         ganancia_unit = (pv_final - costo_civa_unit) if pv_final > 0 else 0.0
+        pv_final_ars = pv_final * tc_venta if tc_venta else 0.0
+        # Costeo!H42 = IF(E42>0,E42-B42,0) — RESTA de dos valores en ARS que
+        # usan tasas distintas (E42=PV Final a TC Venta, B42=Costo a TC
+        # Operativos), no la ganancia en USD multiplicada por una sola tasa
+        # (eso mezclaría mal las dos tasas apenas TC Venta ≠ TC Operativos).
+        ganancia_unit_ars = (pv_final_ars - costo_civa_unit * tc_oper) if (pv_final > 0 and tc_venta > 0) else 0.0
         p.update(
             pv_sugerido_usd=pv_sugerido,
             margen_real_pct=margen_real,
             ganancia_unit_usd=ganancia_unit,
             ganancia_total_usd=ganancia_unit * cantidad,
             pv_sugerido_ars=pv_sugerido * tc_oper if tc_oper else 0.0,
-            pv_final_ars=pv_final * tc_venta if tc_venta else 0.0,
-            ganancia_unit_ars=ganancia_unit * tc_oper if tc_oper else 0.0,
-            ganancia_total_ars=(ganancia_unit * cantidad) * tc_oper if tc_oper else 0.0,
+            pv_final_ars=pv_final_ars,
+            ganancia_unit_ars=ganancia_unit_ars,
+            ganancia_total_ars=ganancia_unit_ars * cantidad,
+            # Informativo (referencia de precio de mercado/competencia): no
+            # entra en ningún cálculo de costo ni de margen, mismo rol que
+            # tiene en el Excel (Costeo!F42 = IF(B$40>0,F23*B$40,0)).
+            pv_mercado_ars=pv_mercado * tc_venta if tc_venta else 0.0,
         )
         venta_total_usd += pv_final * cantidad
 
     check_diferencia = total_c_iva_usd - total_costeo_check
-    venta_total_ars = venta_total_usd * tc_oper if tc_oper else 0.0
+    venta_total_ars = venta_total_usd * tc_oper if tc_oper else 0.0  # sin cambios, ya es igual al Excel
     ganancia_bruta_usd = (venta_total_usd - total_c_iva_usd) if venta_total_usd > 0 else 0.0
-    ganancia_bruta_ars = ganancia_bruta_usd * tc_oper if tc_oper else 0.0
+    # Costeo!C71 = IF(C70>0,C70-C69,0) — resta directo de dos totales ARS ya
+    # bien calculados. Antes multiplicaba la ganancia en USD por TC
+    # Operativos, pero total_c_iva_ars mezcla TC Tributos (tributos) y TC
+    # Operativos (el resto) — esa mezcla se pierde al reconstruir desde el
+    # lado USD, y da mal apenas TC Tributos ≠ TC Operativos.
+    ganancia_bruta_ars = (venta_total_ars - total_c_iva_ars) if venta_total_ars > 0 else 0.0
     iva_a_recuperar = subtotal_iva + subtotal_iva_ad + subtotal_ivater_usd
     percep_a_recuperar = subtotal_gcias + subtotal_iibb
     rentabilidad_pct = (ganancia_bruta_usd / total_c_iva_usd) if (total_c_iva_usd > 0 and venta_total_usd > 0) else 0.0

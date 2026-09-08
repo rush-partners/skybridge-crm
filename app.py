@@ -2010,6 +2010,13 @@ def vista_clientes():
 COT_CONDICIONES_VENTA = ["FOB", "EXW", "FCA"]
 COT_TIPOS_ENVIO = ["Marítimo", "Aéreo"]
 
+# Seguro: 3 modos elegibles desde el editor (Cambio confirmado por el dueño
+# tras la auditoría contra el Excel) — la fórmula automática (0,3% s/FOB
+# declarado, piso USD 75) sigue siendo el default y no se toca; estos dos
+# labels solo traducen entre lo que ve el usuario y lo que guarda la base.
+SEGURO_MODO_DB_A_UI = {"auto": "Automático", "ninguno": "No cobrar", "manual": "Manual"}
+SEGURO_MODO_UI_A_DB = {v: k for k, v in SEGURO_MODO_DB_A_UI.items()}
+
 # Prefijo de key de widget por campo. Se usa tanto para renderizar cada campo
 # en la sección que le corresponde, como para "leer" su valor actual desde
 # session_state ANTES de que su widget se renderice (ver _sync_desde_widgets):
@@ -2278,7 +2285,10 @@ def _render_gastos():
         titulo = g.get("concepto") or f"Gasto {n + 1} (sin nombre)"
         if _f_local(g.get("monto")) == 0:
             titulo = f"⚠️ {titulo} — sin monto cargado"
-        with st.expander(f"{n + 1}. {titulo}", expanded=False):
+        # key fija — mismo motivo que en 2️⃣, 3️⃣ y 8️⃣: el título de cada gasto
+        # cambia con el ⚠️ apenas se completa el monto, y sin key eso hace que
+        # la fila se cierre sola en pleno tipeo.
+        with st.expander(f"{n + 1}. {titulo}", expanded=False, key=f"exp_gasto_{uid}"):
             c1, c2, c3 = st.columns(3)
             g["concepto"] = c1.text_input("Concepto", value=g.get("concepto", ""), key=f"gcon_{uid}")
             g["moneda"] = c2.selectbox("Moneda", MONEDAS, index=MONEDAS.index(g.get("moneda") or "USD"), key=f"gmon_{uid}")
@@ -2310,20 +2320,24 @@ def _render_simulacion_venta(resultado):
     for p, r in zip(productos, resultado["productos"]):
         uid = p["_uid"]
         with st.container(border=True, key=f"formrow_venta_{uid}"):
-            c0, c1, c2, c3 = st.columns([2, 1, 1, 1])
+            c0, c1, c2, c3, c4 = st.columns([2, 1, 1, 1, 1])
             c0.markdown(f"**{p.get('descripcion') or '(sin nombre)'}**")
             c0.caption(f"Costo c/IVA unit.: {money(r['costo_civa_unit'])}")
             p["margen_pct"] = c1.number_input("Margen (%)", value=_f_local(p.get("margen_pct")), format="%.2f", key=f"pmargen_{uid}", help="Margen deseado sobre el costo, para calcular el PV sugerido")
             p["pv_final_usd"] = c2.number_input("PV Final (USD)", value=_f_local(p.get("pv_final_usd")), format="%.2f", key=f"pvfin_{uid}", help="Precio de venta real — dejalo en 0 si todavía no lo definiste")
             c3.metric("Margen real", pct(r["margen_real_pct"]))
+            # Informativo (referencia de precio de mercado/competencia): no
+            # entra en ningún cálculo de costo ni de margen.
+            p["pv_mercado_usd"] = c4.number_input("PV Mercado (USD)", value=_f_local(p.get("pv_mercado_usd")), format="%.2f", key=f"pvmerc_{uid}", help="Precio de referencia de mercado/competencia — informativo, no afecta ningún cálculo")
             st.caption(f"PV sugerido: {money(r['pv_sugerido_usd'])} · Ganancia unit.: {money(r['ganancia_unit_usd'])} · Ganancia total: {money(r['ganancia_total_usd'])}")
 
             st.markdown("**Simulación (ARS)**")
-            a0, a1, a2, a3 = st.columns([2, 1, 1, 1])
+            a0, a1, a2, a3, a4 = st.columns([2, 1, 1, 1, 1])
             a0.caption(f"Costo c/IVA unit.: {money(r['costo_civa_unit_ars'], 'ARS')}")
             a1.metric("PV sugerido", money(r["pv_sugerido_ars"], "ARS"))
             a2.metric("PV Final", money(r["pv_final_ars"], "ARS"))
             a3.metric("Margen real", pct(r["margen_real_pct"]))
+            a4.metric("PV Mercado", money(r["pv_mercado_ars"], "ARS"))
             st.caption(f"Ganancia unit.: {money(r['ganancia_unit_ars'], 'ARS')} · Ganancia total: {money(r['ganancia_total_ars'], 'ARS')}")
 
 
@@ -2433,10 +2447,18 @@ def _render_cotizador_editor():
     pctcert_key = f"pctcert_{cot_id}"
     gastosorigen_key = f"gastosorigen_{cot_id}"
     gastoslocaleshdr_key = f"gastoslocaleshdr_{cot_id}"
+    segmodo_key = f"segmodo_{cot_id}"
+    segmanual_key = f"segmanual_{cot_id}"
+    tcventa_key = f"tcventa_{cot_id}"
     tarifa_flete = st.session_state.get(tarifaflete_key, float(cab.get("tarifa_flete") or 0))
     pct_certificacion_input = st.session_state.get(pctcert_key, float(cab.get("pct_certificacion") or 0.5) * 100)
     gastos_origen = st.session_state.get(gastosorigen_key, float(cab.get("gastos_origen") or 0))
     gastos_locales_hdr = st.session_state.get(gastoslocaleshdr_key, float(cab.get("gastos_locales_hdr") or 0))
+    seguro_modo_ui = st.session_state.get(
+        segmodo_key, SEGURO_MODO_DB_A_UI.get(cab.get("seguro_modo") or "auto", "Automático"))
+    seguro_manual_usd = st.session_state.get(segmanual_key, float(cab.get("seguro_manual_usd") or 0))
+    seguro_modo = SEGURO_MODO_UI_A_DB.get(seguro_modo_ui, "auto")
+    tc_venta = st.session_state.get(tcventa_key, float(cab.get("tc_venta") or 0))
     pct_certificacion = pct_certificacion_input / 100
 
     # % IVA de Gastos locales y Seguro: son los únicos 2 de los 4 gastos
@@ -2461,8 +2483,11 @@ def _render_cotizador_editor():
 
     cab_calc = {
         "costo_financiero_pct": cf_pct, "seguro_pct": seguro_pct,
+        "seguro_modo": seguro_modo, "seguro_manual_usd": seguro_manual_usd,
         "tc_tributos": tc_tributos, "tc_operativos": tc_operativos, "arancel_sim": arancel_sim,
         "tarifa_flete": tarifa_flete, "pct_certificacion": pct_certificacion,
+        "gastos_origen": gastos_origen, "condicion_venta": contenedor,
+        "tc_venta": tc_venta,
     }
     # Las secciones se editan en puntos porcentuales (21 = 21%); acá se
     # convierten a fracción (0.21) antes de calcular y guardar.
@@ -2521,7 +2546,13 @@ def _render_cotizador_editor():
     titulo_mercaderia = "2️⃣ Detalle de mercadería y precios"
     if _mercaderia_tiene_ceros(st.session_state.cot_productos):
         titulo_mercaderia += " ⚠️ hay ítems sin cargar"
-    with st.expander(titulo_mercaderia, expanded=False):
+    # key fija: sin esto, Streamlit identifica al expander por su TEXTO — al
+    # agregar/completar un producto el título cambia (aparece o desaparece el
+    # "⚠️"), Streamlit lo trata como un widget distinto y lo vuelve a
+    # colapsar solo, aunque el usuario lo hubiera dejado abierto. Con key
+    # fija el estado abierto/cerrado se sigue por esa key, no por el
+    # texto, y sobrevive el cambio de título.
+    with st.expander(titulo_mercaderia, expanded=False, key=f"exp_mercaderia_{cot_id}"):
         _render_mercaderia()
 
     # ============================================================
@@ -2530,7 +2561,9 @@ def _render_cotizador_editor():
     titulo_tarifas = "3️⃣ Tarifas flete"
     if tarifa_flete == 0 or gastos_origen == 0 or gastos_locales_hdr == 0:
         titulo_tarifas += " ⚠️ hay ítems sin cargar"
-    with st.expander(titulo_tarifas, expanded=False):
+    # key fija — mismo motivo que en 2️⃣: el título cambia con el ⚠️, y sin
+    # key eso hace que se cierre solo apenas se completa el último campo.
+    with st.expander(titulo_tarifas, expanded=False, key=f"exp_tarifas_{cot_id}"):
         tf1, tf2, tf3 = st.columns(3)
         tarifa_flete = tf1.number_input(
             "Tarifa flete (USD)", value=tarifa_flete, format="%.2f", step=10.0, key=tarifaflete_key,
@@ -2554,18 +2587,41 @@ def _render_cotizador_editor():
         )
 
         tf4, tf5, tf6 = st.columns(3)
-        gastos_origen = tf4.number_input(
-            "Gastos en origen (USD)", value=gastos_origen, format="%.2f", step=10.0, key=gastosorigen_key,
-            help="Gastos EXW / en el país de origen (handling, documentación, etc.).",
-        )
-        if gastos_origen == 0:
-            tf4.caption("⚠️ Sin cargar")
+        if contenedor in ("FOB", "FCA"):
+            # No se cobran gastos en origen con estas dos condiciones (el
+            # exportador ya los cubre hasta el puerto de origen) — forzado a
+            # 0 igual que el resto de los campos disabled del formulario
+            # (ver nota de "Tarifa flete certificado" arriba: un disabled=True
+            # no relee su value= solo, hay que pisar session_state a mano).
+            gastos_origen = 0.0
+            st.session_state[gastosorigen_key] = 0.0
+            tf4.number_input(
+                "Gastos en origen (USD)", value=0.0, format="%.2f", disabled=True, key=gastosorigen_key,
+                help="Gastos EXW / en el país de origen (handling, documentación, etc.).",
+            )
+            tf4.caption("No aplica con FOB/FCA — el exportador ya cubre los gastos hasta el puerto de origen.")
+        else:
+            gastos_origen = tf4.number_input(
+                "Gastos en origen (USD)", value=gastos_origen, format="%.2f", step=10.0, key=gastosorigen_key,
+                help="Gastos EXW / en el país de origen (handling, documentación, etc.).",
+            )
+            if gastos_origen == 0:
+                tf4.caption("⚠️ Sin cargar")
         gastos_locales_hdr = tf5.number_input(
             "Gastos locales (USD)", value=gastos_locales_hdr, format="%.2f", step=10.0, key=gastoslocaleshdr_key,
             help="Gastos locales en Argentina asociados al despacho.",
         )
         if gastos_locales_hdr == 0:
             tf5.caption("⚠️ Sin cargar")
+        seguro_modo_ui = tf6.selectbox(
+            "Seguro", list(SEGURO_MODO_UI_A_DB), key=segmodo_key,
+            help="Automático: 0,3% s/FOB declarado con piso USD 75. No cobrar / Manual, a elección.",
+        )
+        seguro_modo = SEGURO_MODO_UI_A_DB.get(seguro_modo_ui, "auto")
+        if seguro_modo == "manual":
+            seguro_manual_usd = tf6.number_input(
+                "Seguro manual (USD)", value=seguro_manual_usd, format="%.2f", step=10.0, key=segmanual_key,
+            )
         segurohdr_key = f"segurohdr_{cot_id}"
         st.session_state[segurohdr_key] = resultado["seguro_declarado"]
         tf6.number_input(
@@ -2620,7 +2676,8 @@ def _render_cotizador_editor():
     titulo_costos_op = "8️⃣ Costos operativos"
     if _gastos_visibles_tiene_ceros(st.session_state.cot_gastos):
         titulo_costos_op += " ⚠️ hay ítems sin cargar"
-    with st.expander(titulo_costos_op, expanded=False):
+    # key fija — mismo motivo que en 2️⃣ y 3️⃣.
+    with st.expander(titulo_costos_op, expanded=False, key=f"exp_costos_op_{cot_id}"):
         _render_gastos()
 
     # ============================================================
@@ -2678,6 +2735,11 @@ def _render_cotizador_editor():
             v4.metric("Ganancia bruta", money(resultado["ganancia_bruta_usd"]))
             v5.metric("Ganancia bruta (ARS)", money(resultado["ganancia_bruta_ars"], "ARS"))
 
+        tc_venta = st.number_input(
+            "TC Venta (ARS, para la simulación)", value=tc_venta, step=1.0, key=tcventa_key,
+            help="Tasa a la que se estima cobrar la venta — informativo, no afecta el costo (secciones 4️⃣ a 9️⃣). "
+                 "En 0, PV Final y Ganancia (ARS) por producto dan $0.",
+        )
         _render_simulacion_venta(resultado)
 
     def _guardar_cotizacion():
@@ -2691,6 +2753,8 @@ def _render_cotizador_editor():
                 "tc_tributos": tc_tributos, "tc_operativos": tc_operativos, "arancel_sim": arancel_sim,
                 "tarifa_flete": tarifa_flete, "pct_certificacion": pct_certificacion,
                 "gastos_origen": gastos_origen, "gastos_locales_hdr": gastos_locales_hdr,
+                "seguro_modo": seguro_modo, "seguro_manual_usd": seguro_manual_usd,
+                "tc_venta": tc_venta,
             },
             productos_list, gastos_list,
             {
