@@ -473,32 +473,6 @@ __SB_VARS__
             background: var(--sb-zone) !important; border-radius: 6px !important;
         }
 
-        /* Stepper del Cotizador: fila de 6 "pills" con el estado de cada
-        sección (del mockup aprobado) — puramente informativo, NO es una
-        navegación por pasos obligatoria: las secciones siguen siendo
-        acordeones libres, cualquiera se abre en el orden que sea. "Activa"
-        = esa sección tiene el expander abierto ahora mismo; "lista" = no le
-        falta ningún dato obligatorio (mismo chequeo ⚠️ que ya tiene cada
-        título de sección). */
-        .sb-stepper { display: flex; gap: 6px; margin-bottom: 18px; }
-        .sb-stepper-item {
-            flex: 1; text-align: center; padding: 10px 6px; border-radius: 8px;
-            background: var(--sb-surface); border: 1px solid var(--sb-border);
-            font-size: 11.5px; font-weight: 700; color: var(--sb-text-secondary);
-        }
-        .sb-stepper-item.active {
-            border-color: var(--sb-orange); color: var(--sb-orange-dark);
-            box-shadow: 0 2px 8px rgba(232, 101, 42, 0.15);
-        }
-        .sb-stepper-item.done { color: #22C55E; }
-        .sb-stepper-num {
-            display: inline-flex; align-items: center; justify-content: center;
-            width: 20px; height: 20px; border-radius: 50%; background: var(--sb-border);
-            color: var(--sb-navy); font-size: 11px; margin-bottom: 4px;
-        }
-        .sb-stepper-item.active .sb-stepper-num { background: var(--sb-orange); color: white; }
-        .sb-stepper-item.done .sb-stepper-num { background: #16A34A; color: white; }
-
         /* Títulos de sección: acento naranja con más contraste (orange-dark)
         sobre fondo claro, y una línea sutil que ordena la jerarquía visual. */
         .stApp h2, .stApp h3 {
@@ -1183,27 +1157,6 @@ def _badge(texto, color):
         f'border-radius:4px; font-size:11px; font-weight:700; text-transform:uppercase; '
         f'letter-spacing:0.03em; white-space:nowrap;">{html.escape(texto)}</span>'
     )
-
-
-def _render_stepper(estados):
-    """Fila de 6 'pills' con el estado de cada sección del Cotizador (ver
-    .sb-stepper en _inyectar_estilos) — componente del mockup aprobado.
-    Puramente informativo: no navega ni fuerza un orden, las secciones
-    siguen siendo acordeones libres. estados: lista de (etiqueta, estado)
-    con estado en {"done", ""} — sin "active": Streamlit no expone de forma
-    confiable qué expander está abierto ahora mismo sin arriesgar romper
-    el abrir/cerrar real de las secciones (ver nota en el call site)."""
-    items_html = []
-    for i, (etiqueta, estado) in enumerate(estados, start=1):
-        clase = f" {estado}" if estado else ""
-        contenido_num = "✓" if estado == "done" else str(i)
-        items_html.append(
-            f'<div class="sb-stepper-item{clase}">'
-            f'<div class="sb-stepper-num">{contenido_num}</div>'
-            f'<div>{html.escape(etiqueta)}</div>'
-            f'</div>'
-        )
-    st.markdown(f'<div class="sb-stepper">{"".join(items_html)}</div>', unsafe_allow_html=True)
 
 
 def _tabla_html(filas, alinear_derecha=None):
@@ -2699,39 +2652,99 @@ def _render_cotizador_editor():
 
     st.subheader(f"Cotización {cab['numero']}")
 
-    # Stepper informativo (mockup aprobado) — "lista" (✓ verde) se calcula
-    # con los mismos datos guardados que usa cada sección para su propio
-    # ⚠️, así que puede mostrarse ACÁ arriba, antes de que esas secciones
-    # se rendericen más abajo (no hace falta esperar al prefetch/resultado).
+    # El Arancel SIM se carga en "Costos operativos", pero necesitamos su
+    # valor actual ya acá para poder calcular una sola vez. Como todavía no
+    # se renderizó ese widget en esta pasada, se lee directamente de
+    # session_state (ver _sync_desde_widgets).
+    arancel_key = f"arancel_{cot_id}"
+    arancel_sim = st.session_state.get(arancel_key, float(cab.get("arancel_sim") or 10))
+
+    # Tarifas flete y seguro: mismo patrón de prefetch que el Arancel SIM —
+    # se lee el último valor tipeado desde session_state antes de calcular,
+    # aunque esos widgets recién se dibujen más abajo, dentro de su pestaña.
+    tarifaflete_key = f"tarifaflete_{cot_id}"
+    pctcert_key = f"pctcert_{cot_id}"
+    gastosorigen_key = f"gastosorigen_{cot_id}"
+    gastoslocaleshdr_key = f"gastoslocaleshdr_{cot_id}"
+    segmodo_key = f"segmodo_{cot_id}"
+    segmanual_key = f"segmanual_{cot_id}"
+    tcventa_key = f"tcventa_{cot_id}"
+    tarifa_flete = st.session_state.get(tarifaflete_key, float(cab.get("tarifa_flete") or 0))
+    pct_certificacion_input = st.session_state.get(pctcert_key, float(cab.get("pct_certificacion") or 0.5) * 100)
+    gastos_origen = st.session_state.get(gastosorigen_key, float(cab.get("gastos_origen") or 0))
+    gastos_locales_hdr = st.session_state.get(gastoslocaleshdr_key, float(cab.get("gastos_locales_hdr") or 0))
+    seguro_modo_ui = st.session_state.get(
+        segmodo_key, SEGURO_MODO_DB_A_UI.get(cab.get("seguro_modo") or "auto", "Automático"))
+    seguro_manual_usd = st.session_state.get(segmanual_key, float(cab.get("seguro_manual_usd") or 0))
+    seguro_modo = SEGURO_MODO_UI_A_DB.get(seguro_modo_ui, "auto")
+    tc_venta = st.session_state.get(tcventa_key, float(cab.get("tc_venta") or 0))
+    pct_certificacion = pct_certificacion_input / 100
+
+    # % IVA de Gastos locales y Seguro: son los únicos 2 de los 4 gastos
+    # relocados que sí llevan IVA (Flete y Gastos en origen no pagan, no
+    # hace falta editarlo) — se editan también en su pestaña para no reabrir
+    # la sección "IVA" separada que se eliminó.
+    _gasto_seguro = next((g for g in st.session_state.cot_gastos if g.get("concepto") == "Seguro"), None)
+    _gasto_gastoslocales = next((g for g in st.session_state.cot_gastos if g.get("concepto") == "Gastos locales"), None)
+    pctivaseguro_key = f"pctivaseguro_{cot_id}"
+    pctivagastoslocales_key = f"pctivagastoslocales_{cot_id}"
+    pct_iva_seguro_input = st.session_state.get(
+        pctivaseguro_key, _f_local(_gasto_seguro.get("pct_iva")) if _gasto_seguro else 21.0)
+    pct_iva_gastoslocales_input = st.session_state.get(
+        pctivagastoslocales_key, _f_local(_gasto_gastoslocales.get("pct_iva")) if _gasto_gastoslocales else 21.0)
+
+    # ============================================================
+    # Navegación por pestañas — reemplaza al stepper puramente informativo
+    # de arriba y a los 6 acordeones independientes de abajo. Pedido
+    # explícito del dueño de la app: "todas las etapas que pusiste arriba
+    # no sirve, solo refleja informacion... pense que iba a contener cada
+    # informacion para que sea un proceso mas dinamico e interactivo" — con
+    # st.tabs() cada ítem ES la navegación: clickearlo muestra directo esa
+    # sección, ninguna es decorativa. "Productos" arranca seleccionada
+    # (pedido: "en productos, por default ya debería aparecer el espacio
+    # para cargar uno").
     #
-    # NO marca la sección con el expander abierto ahora mismo ("activa"):
-    # Streamlit solo expone ese estado vía session_state si el expander
-    # tiene on_change="rerun", y probado acá eso hacía que "Agregar
-    # producto"/"Agregar gasto" (que ya hacen su propio st.rerun() manual)
-    # terminaran confundiendo qué sección quedaba abierta al recargar —
-    # se probó y se revirtió. Mejor un stepper simple y confiable que uno
-    # "completo" que a veces cierra la sección equivocada.
-    _productos_stepper = st.session_state.cot_productos
-    _gastos_stepper = st.session_state.cot_gastos
-    _productos_listos = bool(_productos_stepper) and not _mercaderia_tiene_ceros(_productos_stepper)
-    _render_stepper([
-        ("Datos generales", "done" if cab.get("cliente_id") else ""),
-        ("Productos", "done" if _productos_listos else ""),
-        ("Tarifas flete", "done" if (cab.get("tarifa_flete") and cab.get("gastos_locales_hdr")) else ""),
-        ("Costos operativos", "done" if (
-            _gastos_stepper and not _gastos_visibles_tiene_ceros(_gastos_stepper)
-        ) else ""),
-        ("Memoria de cálculo", "done" if _productos_listos else ""),
-        ("Simulación de venta", "done" if _productos_listos else ""),
-    ])
+    # Los labels (con ✅/⚠️, igual que antes tenían los títulos de los
+    # acordeones) se calculan ACÁ, antes de llamar a st.tabs(), con los
+    # mismos datos guardados que usa cada sección para su propio estado —
+    # no hace falta esperar a que esa sección se renderice para saberlo.
+    #
+    # on_change="ignore" (default) a propósito, NO "rerun": ya se probó
+    # trackear la pestaña activa vía session_state (con on_change="rerun"
+    # en los acordeones) y "Agregar producto"/"Agregar gasto" —que ya hacen
+    # su propio st.rerun() manual— terminaban confundiendo qué sección
+    # quedaba abierta: un desync real entre el estado declarado y lo que se
+    # veía en pantalla. Con on_change="ignore" la pestaña activa la
+    # controla el navegador solo (mismo mecanismo que ya usaban los
+    # acordeones sin on_change en esta app), así que un st.rerun() manual
+    # no la pisa.
+    #
+    # key fija (cot_tabs_{cot_id}): el label de cada pestaña cambia con el
+    # ✅/⚠️ — sin key fija Streamlit arma la key con el texto de las
+    # pestañas y trataría cada cambio de estado como un widget nuevo,
+    # perdiendo la pestaña que el usuario tenía abierta (mismo motivo por
+    # el que los acordeones de antes necesitaban key fija).
+    _productos_tiene_ceros = _mercaderia_tiene_ceros(st.session_state.cot_productos)
+    _productos_listos = bool(st.session_state.cot_productos) and not _productos_tiene_ceros
+    _gastos_tiene_ceros = _gastos_visibles_tiene_ceros(st.session_state.cot_gastos)
+    _tarifas_incompleta = tarifa_flete == 0 or gastos_origen == 0 or gastos_locales_hdr == 0
+
+    label_datos = "📝 Datos generales" + (" ✅" if cab.get("cliente_id") else "")
+    label_productos = "📦 Productos" + (" ⚠️" if _productos_tiene_ceros else (" ✅" if _productos_listos else ""))
+    label_tarifas = "🚚 Tarifas flete y seguro" + (" ⚠️" if _tarifas_incompleta else " ✅")
+    label_costos_op = "🧾 Costos operativos" + (" ⚠️" if _gastos_tiene_ceros else " ✅")
+    label_memoria = "🧮 Memoria de cálculo" + (" ✅" if _productos_listos else "")
+    label_simulacion = "📈 Simulación de venta" + (" ✅" if _productos_listos else "")
+
+    tab_datos, tab_productos, tab_tarifas, tab_costos_op, tab_memoria, tab_simulacion = st.tabs(
+        [label_datos, label_productos, label_tarifas, label_costos_op, label_memoria, label_simulacion],
+        default=label_productos, key=f"cot_tabs_{cot_id}",
+    )
 
     # ============================================================
     # Datos generales de la cotización (antes 1️⃣)
     # ============================================================
-    with st.expander(
-        "Datos generales de la cotización", expanded=False,
-        icon=":material/description:", key=f"exp_datos_generales_{cot_id}",
-    ):
+    with tab_datos:
         # Las keys incluyen cot_id para que, al cambiar de cotización, Streamlit
         # trate cada widget como uno nuevo y tome los valores recién cargados en
         # lugar de conservar el valor tipeado para la cotización anterior.
@@ -2781,51 +2794,10 @@ def _render_cotizador_editor():
 
             st.form_submit_button("💾 Guardar datos generales")
 
-    # El Arancel SIM se carga en "Costos operativos", pero necesitamos su
-    # valor actual ya acá para poder calcular una sola vez. Como todavía no
-    # se renderizó ese widget en esta pasada, se lee directamente de
-    # session_state (ver _sync_desde_widgets).
-    arancel_key = f"arancel_{cot_id}"
-    arancel_sim = st.session_state.get(arancel_key, float(cab.get("arancel_sim") or 10))
-
-    # Tarifas flete y seguro: mismo patrón de prefetch que el Arancel SIM —
-    # se lee el último valor tipeado desde session_state antes de calcular,
-    # aunque esos widgets recién se dibujen más abajo en la página.
-    tarifaflete_key = f"tarifaflete_{cot_id}"
-    pctcert_key = f"pctcert_{cot_id}"
-    gastosorigen_key = f"gastosorigen_{cot_id}"
-    gastoslocaleshdr_key = f"gastoslocaleshdr_{cot_id}"
-    segmodo_key = f"segmodo_{cot_id}"
-    segmanual_key = f"segmanual_{cot_id}"
-    tcventa_key = f"tcventa_{cot_id}"
-    tarifa_flete = st.session_state.get(tarifaflete_key, float(cab.get("tarifa_flete") or 0))
-    pct_certificacion_input = st.session_state.get(pctcert_key, float(cab.get("pct_certificacion") or 0.5) * 100)
-    gastos_origen = st.session_state.get(gastosorigen_key, float(cab.get("gastos_origen") or 0))
-    gastos_locales_hdr = st.session_state.get(gastoslocaleshdr_key, float(cab.get("gastos_locales_hdr") or 0))
-    seguro_modo_ui = st.session_state.get(
-        segmodo_key, SEGURO_MODO_DB_A_UI.get(cab.get("seguro_modo") or "auto", "Automático"))
-    seguro_manual_usd = st.session_state.get(segmanual_key, float(cab.get("seguro_manual_usd") or 0))
-    seguro_modo = SEGURO_MODO_UI_A_DB.get(seguro_modo_ui, "auto")
-    tc_venta = st.session_state.get(tcventa_key, float(cab.get("tc_venta") or 0))
-    pct_certificacion = pct_certificacion_input / 100
-
-    # % IVA de Gastos locales y Seguro: son los únicos 2 de los 4 gastos
-    # relocados que sí llevan IVA (Flete y Gastos en origen no pagan, no
-    # hace falta editarlo) — se editan también acá para no reabrir la
-    # sección "IVA" separada que se eliminó.
-    _gasto_seguro = next((g for g in st.session_state.cot_gastos if g.get("concepto") == "Seguro"), None)
-    _gasto_gastoslocales = next((g for g in st.session_state.cot_gastos if g.get("concepto") == "Gastos locales"), None)
-    pctivaseguro_key = f"pctivaseguro_{cot_id}"
-    pctivagastoslocales_key = f"pctivagastoslocales_{cot_id}"
-    pct_iva_seguro_input = st.session_state.get(
-        pctivaseguro_key, _f_local(_gasto_seguro.get("pct_iva")) if _gasto_seguro else 21.0)
-    pct_iva_gastoslocales_input = st.session_state.get(
-        pctivagastoslocales_key, _f_local(_gasto_gastoslocales.get("pct_iva")) if _gasto_gastoslocales else 21.0)
-
     # Sincronizamos productos y gastos con el último valor de sus widgets
-    # (aunque esas secciones se rendericen más abajo) para poder calcular UNA
-    # sola vez y mostrar secciones dependientes (CIF, base imponible) antes
-    # en la página, igual que en el Excel.
+    # (aunque esas secciones se rendericen en otra pestaña) para poder
+    # calcular UNA sola vez y mostrar el resumen fijo antes de que el
+    # usuario elija una pestaña, igual que en el Excel.
     _sync_desde_widgets(st.session_state.cot_productos, PROD_FIELD_PREFIX)
     _sync_desde_widgets(st.session_state.cot_gastos, GASTO_FIELD_PREFIX)
 
@@ -2871,12 +2843,13 @@ def _render_cotizador_editor():
     resultado = calculo.calcular(cab_calc, productos_list, gastos_list)
 
     # ============================================================
-    # Resumen fijo arriba de todo: antes había que abrir varias secciones
-    # una por una hasta llegar a "Resultado de la operación" (dentro de
-    # "Memoria de cálculo") para ver el número que en realidad importa acá.
-    # Estos 3 valores son EXACTAMENTE los mismos que van a aparecer más
-    # abajo en esa sección — mismo diccionario "resultado", ningún cálculo
-    # nuevo — solo se muestran también acá arriba, sin obligar a abrir nada.
+    # Resumen fijo, debajo de las pestañas: antes había que abrir varias
+    # secciones una por una hasta llegar a "Resultado de la operación"
+    # (dentro de "Memoria de cálculo") para ver el número que en realidad
+    # importa acá. Estos 3 valores son EXACTAMENTE los mismos que van a
+    # aparecer más abajo en esa sección — mismo diccionario "resultado",
+    # ningún cálculo nuevo — solo se muestran también acá, sin obligar a
+    # abrir ni elegir ninguna pestaña.
     #
     # A propósito NO incluye venta/ganancia/rentabilidad: este resumen es
     # el costeo de la importación (lo que se paga), no el negocio de venta
@@ -2895,27 +2868,13 @@ def _render_cotizador_editor():
     # Productos (mercadería + derechos/tasa/antidumping + IVA/IVA Adic./
     # Ganancias/IIBB — antes eran 3 secciones separadas: 2️⃣, 5️⃣ y 7️⃣)
     # ============================================================
-    titulo_productos = "Productos"
-    if _mercaderia_tiene_ceros(st.session_state.cot_productos):
-        titulo_productos += " ⚠️ hay ítems sin cargar"
-    # key fija: sin esto, Streamlit identifica al expander por su TEXTO — al
-    # agregar/completar un producto el título cambia (aparece o desaparece el
-    # "⚠️"), Streamlit lo trata como un widget distinto y lo vuelve a
-    # colapsar solo, aunque el usuario lo hubiera dejado abierto. Con key
-    # fija el estado abierto/cerrado se sigue por esa key, no por el
-    # texto, y sobrevive el cambio de título.
-    with st.expander(titulo_productos, expanded=False, key=f"exp_productos_{cot_id}", icon=":material/inventory_2:"):
+    with tab_productos:
         _render_productos()
 
     # ============================================================
     # Tarifas flete y seguro (antes 3️⃣)
     # ============================================================
-    titulo_tarifas = "Tarifas flete y seguro"
-    if tarifa_flete == 0 or gastos_origen == 0 or gastos_locales_hdr == 0:
-        titulo_tarifas += " ⚠️ hay ítems sin cargar"
-    # key fija — mismo motivo que en Productos: el título cambia con el ⚠️, y
-    # sin key eso hace que se cierre solo apenas se completa el último campo.
-    with st.expander(titulo_tarifas, expanded=False, key=f"exp_tarifas_{cot_id}", icon=":material/local_shipping:"):
+    with tab_tarifas:
         tf1, tf2, tf3 = st.columns(3)
         tarifa_flete = tf1.number_input(
             "Tarifa flete (USD)", value=tarifa_flete, format="%.2f", step=10.0, key=tarifaflete_key,
@@ -2997,11 +2956,7 @@ def _render_cotizador_editor():
     # ============================================================
     # Costos operativos (antes 8️⃣, + Arancel SIM que antes vivía en 7️⃣)
     # ============================================================
-    titulo_costos_op = "Costos operativos"
-    if _gastos_visibles_tiene_ceros(st.session_state.cot_gastos):
-        titulo_costos_op += " ⚠️ hay ítems sin cargar"
-    # key fija — mismo motivo que en Productos y Tarifas flete y seguro.
-    with st.expander(titulo_costos_op, expanded=False, key=f"exp_costos_op_{cot_id}", icon=":material/receipt_long:"):
+    with tab_costos_op:
         arancel_sim = st.number_input(
             "Arancel SIM (USD)", value=arancel_sim, step=1.0, key=arancel_key,
             help="Costo fijo del Sistema Informático María (trámite aduanero), no depende del producto.",
@@ -3013,10 +2968,7 @@ def _render_cotizador_editor():
     # 6️⃣ Base imponible para IVA y 9️⃣ Resultado de la operación (costo puro
     # — sin venta ni margen, eso vive en "Simulación de venta").
     # ============================================================
-    with st.expander(
-        "Memoria de cálculo (auditoría — solo lectura)", expanded=False,
-        icon=":material/calculate:", key=f"exp_memoria_{cot_id}",
-    ):
+    with tab_memoria:
         st.markdown("**Valor CIF**")
         _render_cif(resultado)
 
@@ -3068,10 +3020,7 @@ def _render_cotizador_editor():
     # Simulación de venta (antes 🔟 — todo lo que es venta, margen y
     # ganancia estimada vive acá, no en "Memoria de cálculo")
     # ============================================================
-    with st.expander(
-        "Simulación de venta", expanded=False,
-        icon=":material/trending_up:", key=f"exp_simulacion_{cot_id}",
-    ):
+    with tab_simulacion:
         with st.container(border=True, key=f"resultgroup_venta_{cot_id}"):
             st.markdown('<div class="sb-card-title">📈 Resultado estimado de la venta</div>', unsafe_allow_html=True)
             v1, v2, v3 = st.columns(3)
