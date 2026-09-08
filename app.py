@@ -4551,15 +4551,28 @@ def _render_fila_contacto_crm(c, en_curso_por_cliente=None, resumen_cot_pipeline
         c1.markdown("".join(lineas_c1), unsafe_allow_html=True)
 
         with c2:
+            # margin-top:3px SOLO si ya hay algo antes en esta columna — el
+            # caso más común es que no haya "próximo seguimiento" cargado,
+            # y ahí el badge de inactividad (o el pipeline) es lo PRIMERO
+            # de c2: con el margen fijo de antes, ese primer elemento
+            # quedaba 3px más abajo que el nombre (c1) y la etapa (c3), que
+            # no tienen ningún margen propio — con vertical_alignment="top"
+            # ese desfasaje de 3px pasó a notarse mucho más (reportado por
+            # Tom). Se resuelve dejando el margen solo entre elementos que
+            # realmente se apilan, nunca antes del primero.
+            hay_algo_antes = False
             seguimiento_txt = _fmt_fecha(c.get("proximo_seguimiento"))
             if seguimiento_txt:
                 st.markdown(
                     f'<div style="font-size:12px; color:var(--sb-text-secondary);">📅 {seguimiento_txt}</div>',
                     unsafe_allow_html=True,
                 )
+                hay_algo_antes = True
             badge_inact = _badge_inactividad(c)
             if badge_inact:
-                st.markdown(f'<div style="margin-top:3px;">{badge_inact}</div>', unsafe_allow_html=True)
+                margen = "margin-top:3px;" if hay_algo_antes else ""
+                st.markdown(f'<div style="{margen}">{badge_inact}</div>', unsafe_allow_html=True)
+                hay_algo_antes = True
             # Pipeline operativo: solo Calificado ("Cotizado") y solo si
             # todavía no mandó ninguna cotización (enviada o ya aprobada) —
             # una vez enviada, el embudo pasa a Negociación y el pipeline
@@ -4572,8 +4585,9 @@ def _render_fila_contacto_crm(c, en_curso_por_cliente=None, resumen_cot_pipeline
                     pipeline = crm.pipeline_operativo(tipos)
                     if pipeline:
                         n, paso = pipeline
+                        margen = "margin-top:3px;" if hay_algo_antes else ""
                         st.markdown(
-                            f'<div style="font-size:12px; color:var(--sb-text-secondary); margin-top:3px;">'
+                            f'<div style="font-size:12px; color:var(--sb-text-secondary); {margen}">'
                             f'<b style="color:var(--sb-navy);">{n}/7</b> · {html.escape(paso)}</div>',
                             unsafe_allow_html=True,
                         )
