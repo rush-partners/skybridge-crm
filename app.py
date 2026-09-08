@@ -1024,13 +1024,17 @@ __CRM_ETAPA_CSS__
         }
 
         /* Íconos compactos de acceso rápido (WhatsApp / mail / ficha de
-        cliente vinculado): mismo tratamiento que cotfilaacciones_ en el
-        historial del Cotizador — cuadrados de 34px en fila, alineados a la
-        izquierda (a diferencia de cotfilaacciones_, acá comparten columna
-        con nada más a la derecha). */
+        cliente vinculado / eliminar): mismo tratamiento que
+        cotfilaacciones_ en el historial del Cotizador — cuadrados en fila,
+        alineados a la izquierda (a diferencia de cotfilaacciones_, acá
+        comparten columna con nada más a la derecha). 30px + 4px de gap (no
+        34px/6px): con los 4 íconos presentes a la vez (WhatsApp+mail+
+        cliente+eliminar, el peor caso real) 34px/6px alcanzaba a
+        desbordar la columna en pantallas angostas y el 4to ícono caía a una
+        2da línea — verificado con captura real, no a ojo. */
         [class*="st-key-filacrmicons_"] {
             display: flex !important; flex-direction: row !important;
-            align-items: center; gap: 6px;
+            align-items: center; gap: 4px;
         }
         /* El wrapper que Streamlit arma por cada st.markdown/st.button/
         st.link_button (.stElementContainer) es el hijo real del flex de
@@ -1038,21 +1042,21 @@ __CRM_ETAPA_CSS__
         adentro, y cada wrapper traía su propio ancho "de fábrica" distinto
         (el de un link armado a mano con st.markdown mucho más ancho que el
         de un ícono de Streamlit, y el de un ícono más angosto que su
-        propio botón de 34px) — con eso el gap de acá arriba terminaba
+        propio botón de 30px) — con eso el gap de acá arriba terminaba
         siendo cualquier cosa: un hueco enorme después de WhatsApp y los
         otros 3 íconos superpuestos casi sin separación. Fijando el
-        wrapper mismo a 34×34 y centrando su contenido adentro, los 4
-        quedan del mismo tamaño real y el gap de 6px pasa a ser el mismo
+        wrapper mismo a 30×30 y centrando su contenido adentro, los 4
+        quedan del mismo tamaño real y el gap de 4px pasa a ser el mismo
         entre todos. */
         [class*="st-key-filacrmicons_"] .stElementContainer {
-            width: 34px !important; flex: 0 0 34px !important;
+            width: 30px !important; flex: 0 0 30px !important;
             display: flex !important; align-items: center !important; justify-content: center !important;
         }
         [class*="st-key-filacrmicons_"] .stButton button,
         [class*="st-key-filacrmicons_"] .stLinkButton a,
         [class*="st-key-filacrmicons_"] .sb-btn-link {
-            width: 34px !important; min-width: 34px !important; height: 34px !important;
-            min-height: 34px !important; padding: 0 !important; border-radius: 6px !important;
+            width: 30px !important; min-width: 30px !important; height: 30px !important;
+            min-height: 30px !important; padding: 0 !important; border-radius: 6px !important;
         }
         /* El WhatsApp de esta fila es un .sb-btn-link (target="whatsapp_web"
         fijo, ver _link_button_html) en vez de un st.link_button nativo —
@@ -1061,11 +1065,11 @@ __CRM_ETAPA_CSS__
         texto en mayúscula/letter-spacing pensado para un botón de ancho
         completo, no para un cuadrado de ícono. */
         [class*="st-key-filacrmicons_"] .sb-btn-link {
-            margin-bottom: 0 !important; text-transform: none; letter-spacing: normal; font-size: 15px;
+            margin-bottom: 0 !important; text-transform: none; letter-spacing: normal; font-size: 14px;
         }
         [class*="st-key-filacrmicons_"] .stTooltipIcon,
         [class*="st-key-filacrmicons_"] .stTooltipHoverTarget {
-            width: 34px !important; height: 34px !important;
+            width: 30px !important; height: 30px !important;
         }
 
         /* Columnas del Kanban (Panel de Control, key="zona_..."): agrupan
@@ -1249,9 +1253,9 @@ def _badge(texto, color):
     con el color de fondo al 13% y el texto al color pleno — un solo look
     para todos los badges de la app en vez de reinventarlo por sección."""
     return (
-        f'<span style="background:{color}22; color:{color}; padding:2px 9px; '
-        f'border-radius:4px; font-size:11px; font-weight:700; text-transform:uppercase; '
-        f'letter-spacing:0.03em; white-space:nowrap;">{html.escape(texto)}</span>'
+        f'<span style="background:{color}22; color:{color}; padding:3px 7px; '
+        f'border-radius:4px; font-size:10px; font-weight:700; text-transform:uppercase; '
+        f'letter-spacing:0; white-space:nowrap;">{html.escape(texto)}</span>'
     )
 
 
@@ -4400,6 +4404,15 @@ PROVINCIAS_AR = [
     "Santa Fe", "Santiago del Estero", "Tierra del Fuego", "Tucumán",
 ]
 
+# Origen del contacto: desplegable fijo (pedido de Tom) — mismo patrón
+# "— Sin especificar —" de PROVINCIAS_AR como opción por defecto. Si en el
+# futuro hace falta un origen fuera de esta lista, agregar acá (no "Otro"
+# libre: dentro de un st.form los widgets no reaccionan hasta el submit,
+# así que un campo "Otro" condicional no puede aparecer en el mismo envío
+# en que se lo elige — mismo motivo documentado más abajo en el form).
+_SIN_ORIGEN = "— Sin especificar —"
+ORIGENES_CRM = [_SIN_ORIGEN, "Referido", "Web", "WhatsApp", "Evento", "Otros"]
+
 
 def _render_carga_rapida_contacto():
     """Alta rápida de un contacto (nombre/CUIT/teléfono + botón) — espacio
@@ -4511,8 +4524,12 @@ def _render_fila_contacto_crm(c, en_curso_por_cliente=None, resumen_cot_pipeline
         # c4 y c5 más anchas que en la primera versión: los botones
         # partían en 2 líneas dentro de una columna angosta, lo que hacía
         # crecer esa columna en alto y perder la alineación vertical con
-        # el resto de la fila.
-        c1, c2, c3, c4, c5 = st.columns([1.8, 1.3, 1.1, 1.6, 3.8], vertical_alignment="center")
+        # el resto de la fila. c3 ensanchada (y c1/c2 recortadas) para que
+        # la etiqueta de etapa más larga ("En negociación") no se superponga
+        # con los íconos de c4 en ventanas angostas — verificado con captura
+        # real a 1000/1280/1440px, claro y oscuro (ver íconos de 30px en
+        # filacrmicons_ más abajo, mismo motivo).
+        c1, c2, c3, c4, c5 = st.columns([1.5, 1.0, 1.9, 1.6, 3.8], vertical_alignment="center")
 
         subt = " · ".join(v for v in (c.get("empresa"), c.get("cuit")) if v)
         linea_nombre = f'<div style="font-weight:700; font-size:14px;">{html.escape(c["nombre"])}</div>'
@@ -4767,17 +4784,25 @@ def _render_acciones_rapidas(c, autor, key_prefix):
         else:
             st.caption("Este contacto no tiene WhatsApp cargado — completalo en la pestaña 'Datos'.")
 
-    if st.button("✅ Marcar respuesta recibida", key=f"resp_{key_prefix}"):
-        db.add_activity(c["id"], "respuesta_recibida", "", autor)
-        _flash("Respuesta registrada.")
-        st.rerun()
-
-    st.button(
-        "Nueva cotización", icon=":material/add:", key=f"nuevacotacciones_{key_prefix}",
-        use_container_width=True, on_click=_cotizar_contacto, args=(c["id"],),
-        help="Crea (o reutiliza) el cliente vinculado en el módulo Clientes y abre el Cotizador "
-        "con una cotización nueva para él.",
-    )
+    # Uno al lado del otro (pedido de Tom) en vez de apilados — misma
+    # jerarquía visual que el resto de los pares de acciones de la app.
+    # "Marcar respuesta recibida" también avanza la etapa a "Contactado"
+    # (mismo criterio que "Marcar contactado" de email/WhatsApp arriba: una
+    # respuesta real del contacto es evidencia de gestión, no solo una nota).
+    col_resp, col_cot = st.columns(2)
+    with col_resp:
+        if st.button("✅ Marcar respuesta recibida", key=f"resp_{key_prefix}", use_container_width=True):
+            db.add_activity(c["id"], "respuesta_recibida", "", autor)
+            _avanzar_etapa_si_corresponde(c["id"], "Contactado", autor)
+            _flash("Respuesta registrada.")
+            st.rerun()
+    with col_cot:
+        st.button(
+            "Nueva cotización", icon=":material/add:", key=f"nuevacotacciones_{key_prefix}",
+            use_container_width=True, on_click=_cotizar_contacto, args=(c["id"],),
+            help="Crea (o reutiliza) el cliente vinculado en el módulo Clientes y abre el Cotizador "
+            "con una cotización nueva para él.",
+        )
 
 
 def _avanzar_etapa_si_corresponde(contact_id, etapa_objetivo, autor):
@@ -4975,39 +5000,48 @@ def _render_ficha_contacto(c):
         with st.container(border=True, key=f"formrow_datos_contacto_{c['id']}"):
             st.markdown("#### 📁 Datos")
             with st.form(f"edit_contacto_{c['id']}"):
+                # Orden pedido por Tom: Nombre de contacto, Empresa, CUIT,
+                # Cargo del contacto, Localidad, Provincia, WhatsApp, Email,
+                # Origen, Asignado a, Rubro, Producto de interés (reemplaza
+                # a "Próximo seguimiento" — ver más abajo). Origen y
+                # Asignado a NO necesitan un "Otro" condicional acá (mismo
+                # motivo que Provincia): dentro de un st.form los widgets no
+                # re-renderizan hasta el submit, así que un campo libre que
+                # solo aparece si se elige "Otro" no puede funcionar acá.
                 c1, c2 = st.columns(2)
                 nombre = c1.text_input("Nombre de contacto", value=c["nombre"], key=f"cn_{c['id']}")
                 empresa = c2.text_input("Empresa", value=c.get("empresa") or "", key=f"ce_{c['id']}")
                 c3, c4 = st.columns(2)
                 cuit = c3.text_input("CUIT", value=c.get("cuit") or "", key=f"ccuit_{c['id']}")
-                email = c4.text_input("Email", value=c.get("email") or "", key=f"cem_{c['id']}")
-                c5, c6 = st.columns(2)
-                whatsapp = c5.text_input("WhatsApp", value=c.get("whatsapp") or "", key=f"cw_{c['id']}")
-                origen = c6.text_input("Origen", value=c.get("origen") or "", key=f"co_{c['id']}")
-                c7, c8 = st.columns(2)
-                asignado_a = c7.text_input("Asignado a", value=c.get("asignado_a") or "", key=f"ca_{c['id']}")
-                proximo_seguimiento = c8.date_input(
-                    "Próximo seguimiento", value=_parse_fecha(c.get("proximo_seguimiento")),
-                    format="DD/MM/YYYY", key=f"cps_{c['id']}",
+                cargo_contacto = c4.text_input(
+                    "Cargo del contacto", value=c.get("cargo_contacto") or "", key=f"ccargo_{c['id']}"
                 )
-                # Fase 6 — ficha ampliada. Texto simple (mismo patrón que el
-                # resto de estos campos), no selectbox+"Otro": adentro de un
-                # st.form los widgets no re-renderizan hasta el submit, así
-                # que un campo "Otro" condicional no aparecería en el mismo
-                # envío en el que se elige "Otro" — UX rota. Queda pendiente
-                # para cuando se resuelva esa interacción (fuera del form,
-                # como ya está "Etapa" más arriba).
-                c9, c10 = st.columns(2)
-                provincia = c9.selectbox(
+                c5, c6 = st.columns(2)
+                localidad = c5.text_input("Localidad", value=c.get("localidad") or "", key=f"cloc_{c['id']}")
+                provincia = c6.selectbox(
                     "Provincia", PROVINCIAS_AR,
                     index=PROVINCIAS_AR.index(c.get("provincia")) if c.get("provincia") in PROVINCIAS_AR else 0,
                     key=f"cprov_{c['id']}",
                 )
-                localidad = c10.text_input("Localidad", value=c.get("localidad") or "", key=f"cloc_{c['id']}")
+                c7, c8 = st.columns(2)
+                whatsapp = c7.text_input("WhatsApp", value=c.get("whatsapp") or "", key=f"cw_{c['id']}")
+                email = c8.text_input("Email", value=c.get("email") or "", key=f"cem_{c['id']}")
+                c9, c10 = st.columns(2)
+                origen = c9.selectbox(
+                    "Origen", ORIGENES_CRM,
+                    index=ORIGENES_CRM.index(c.get("origen")) if c.get("origen") in ORIGENES_CRM else 0,
+                    key=f"co_{c['id']}",
+                )
+                asignado_a = c10.text_input("Asignado a", value=c.get("asignado_a") or "", key=f"ca_{c['id']}")
                 c11, c12 = st.columns(2)
                 rubro = c11.text_input("Rubro", value=c.get("rubro") or "", key=f"crub_{c['id']}")
-                cargo_contacto = c12.text_input(
-                    "Cargo del contacto", value=c.get("cargo_contacto") or "", key=f"ccargo_{c['id']}"
+                # Reemplaza a "Próximo seguimiento" (pedido de Tom) — el
+                # valor existente de proximo_seguimiento NO se toca: sigue
+                # viajando tal cual a db.update_contact más abajo, así no se
+                # pierde el dato ni la funcionalidad que dependa de él,
+                # simplemente deja de tener un campo propio en este form.
+                producto_interes = c12.text_input(
+                    "Producto de interés", value=c.get("producto_interes") or "", key=f"cprod_{c['id']}"
                 )
                 b1, b2 = st.columns(2)
                 if b1.form_submit_button("💾 Guardar cambios"):
@@ -5019,9 +5053,11 @@ def _render_ficha_contacto(c):
                     else:
                         db.update_contact(
                             c["id"], nombre, empresa, email_norm, crm.normalizar_whatsapp(whatsapp),
-                            origen, asignado_a, proximo_seguimiento.isoformat() if proximo_seguimiento else None,
+                            origen if origen != _SIN_ORIGEN else "", asignado_a,
+                            c.get("proximo_seguimiento"),  # sin campo propio en este form — se conserva tal cual
                             cuit,
                             provincia if provincia != _SIN_PROVINCIA else "", localidad, rubro, cargo_contacto,
+                            producto_interes,
                         )
                         st.success("Actualizado.")
                         st.rerun()
@@ -5133,6 +5169,7 @@ def _procesar_importacion(filas, actualizar_duplicados, ejecutar, autor=""):
                     localidad=f["localidad"] or dup.get("localidad") or "",
                     rubro=f["rubro"] or dup.get("rubro") or "",
                     cargo_contacto=f["cargo_contacto"] or dup.get("cargo_contacto") or "",
+                    producto_interes=f["producto_interes"] or dup.get("producto_interes") or "",
                 )
             estado = "Duplicado — actualizado" if (ejecutar and actualizar_duplicados) else "Duplicado — se omite"
             resultados.append({**f, "estado": estado, "contacto_id": dup["id"]})
@@ -5146,6 +5183,7 @@ def _procesar_importacion(filas, actualizar_duplicados, ejecutar, autor=""):
                     crm.STAGE_INICIAL, f["asignado_a"],
                     provincia=f["provincia"], localidad=f["localidad"],
                     rubro=f["rubro"], cargo_contacto=f["cargo_contacto"],
+                    producto_interes=f["producto_interes"],
                 )
                 db.add_activity(new_id, "nota", "Alta por importación de archivo.", autor)
             resultados.append({**f, "estado": "Nuevo", "contacto_id": new_id})
@@ -5187,6 +5225,7 @@ def _render_importar_contactos():
         "whatsapp": "WhatsApp / Teléfono", "origen": "Origen", "asignado_a": "Asignado a",
         "provincia": "Provincia", "localidad": "Localidad",
         "rubro": "Rubro", "cargo_contacto": "Cargo del contacto",
+        "producto_interes": "Producto de interés",
     }
     mapeo = {}
     cols_form = st.columns(3)

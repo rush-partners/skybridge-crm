@@ -661,6 +661,10 @@ COLUMNAS_NUEVAS = {
         "localidad": "TEXT",
         "rubro": "TEXT",
         "cargo_contacto": "TEXT",
+        # Reemplaza a "próximo seguimiento" en el form de la ficha (pedido
+        # de Tom) — próximo_seguimiento sigue existiendo como columna (se
+        # sigue guardando/leyendo, solo dejó de tener campo propio ahí).
+        "producto_interes": "TEXT",
     },
     "usuarios": {
         "intentos_fallidos": "INTEGER DEFAULT 0",
@@ -1322,14 +1326,14 @@ def find_contacto_duplicado(email: str = "", whatsapp: str = ""):
 
 def create_contact(nombre, empresa="", email="", whatsapp="", origen="", etapa="Nuevo",
                     asignado_a="", proximo_seguimiento=None, cuit="",
-                    provincia="", localidad="", rubro="", cargo_contacto=""):
+                    provincia="", localidad="", rubro="", cargo_contacto="", producto_interes=""):
     conn = get_connection()
     cur = conn.execute(
         """INSERT INTO contacts (nombre, empresa, cuit, email, whatsapp, origen, etapa, asignado_a,
-           proximo_seguimiento, provincia, localidad, rubro, cargo_contacto)
-           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+           proximo_seguimiento, provincia, localidad, rubro, cargo_contacto, producto_interes)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
         (nombre, empresa, cuit, email, whatsapp, origen, etapa, asignado_a, proximo_seguimiento,
-         provincia, localidad, rubro, cargo_contacto),
+         provincia, localidad, rubro, cargo_contacto, producto_interes),
     )
     conn.commit()
     new_id = cur.lastrowid
@@ -1339,17 +1343,18 @@ def create_contact(nombre, empresa="", email="", whatsapp="", origen="", etapa="
 
 def update_contact(contact_id, nombre, empresa="", email="", whatsapp="", origen="",
                     asignado_a="", proximo_seguimiento=None, cuit="",
-                    provincia="", localidad="", rubro="", cargo_contacto=""):
+                    provincia="", localidad="", rubro="", cargo_contacto="", producto_interes=""):
     # La etapa NO se actualiza acá: cambia únicamente por change_etapa_contacto,
     # que además deja registro en activity_log — así el timeline nunca queda
     # desincronizado de la etapa actual del contacto.
     conn = get_connection()
     conn.execute(
         """UPDATE contacts SET nombre=?, empresa=?, cuit=?, email=?, whatsapp=?, origen=?,
-           asignado_a=?, proximo_seguimiento=?, provincia=?, localidad=?, rubro=?, cargo_contacto=?
+           asignado_a=?, proximo_seguimiento=?, provincia=?, localidad=?, rubro=?, cargo_contacto=?,
+           producto_interes=?
            WHERE id=?""",
         (nombre, empresa, cuit, email, whatsapp, origen, asignado_a, proximo_seguimiento,
-         provincia, localidad, rubro, cargo_contacto, contact_id),
+         provincia, localidad, rubro, cargo_contacto, producto_interes, contact_id),
     )
     conn.commit()
     conn.close()

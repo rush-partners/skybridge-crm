@@ -382,6 +382,7 @@ CAMPOS_IMPORTABLES = {
     "localidad": ["localidad", "ciudad", "city"],
     "rubro": ["rubro", "sector", "industria", "industry"],
     "cargo_contacto": ["cargo", "puesto", "rol", "position", "title"],
+    "producto_interes": ["producto de interes", "producto", "interes"],
 }
 
 
@@ -416,4 +417,5 @@ def preparar_fila_contacto(fila: dict) -> dict:
         "localidad": (fila.get("localidad") or "").strip(),
         "rubro": (fila.get("rubro") or "").strip(),
         "cargo_contacto": (fila.get("cargo_contacto") or "").strip(),
+        "producto_interes": (fila.get("producto_interes") or "").strip(),
     }
