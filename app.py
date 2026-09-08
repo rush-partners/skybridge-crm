@@ -277,25 +277,27 @@ __SB_VARS__
         }
         [data-testid="stExpander"] summary svg { color: var(--sb-orange) !important; }
 
-        /* Navegación por pestañas del Cotizador (st.tabs): mismo lenguaje
-        visual que los expanders de arriba (tarjeta con superficie propia,
-        borde, sombra, glow naranja) en vez del look nativo de Streamlit
-        (texto plano + una línea de subrayado) — así cada pestaña se lee
-        como una tarjeta clickeable, calcado del mockup aprobado. Esta
-        versión de Streamlit ya no usa [data-baseweb="tab"] (eso quedó
-        muerto de una versión anterior) — el selector correcto es
-        [data-testid="stTab"] con role="tab" / aria-selected. */
-        /* Con 6 pestañas (+ su ✅/⚠️ de estado) no siempre entran en una sola
+        /* Navegación por pestañas del Cotizador (st.tabs). Rediseño pedido
+        por Tom — la versión anterior (cada pestaña como tarjeta con su
+        propio borde+sombra, TODO dentro de un tablist que además tenía su
+        propio borde) se leía como "2 líneas" superpuestas y apretada/burda,
+        no minimalista. Esta versión es la clásica barra de pestañas chata:
+        una sola línea base para toda la fila, la pestaña activa se marca
+        con un subrayado naranja de 2px — sin caja, sin sombra, sin doble
+        borde. Esta versión de Streamlit ya no usa [data-baseweb="tab"] (eso
+        quedó muerto de una versión anterior) — el selector correcto es
+        [data-testid="stTab"] con role="tab" / aria-selected.
+
+        Con 6 pestañas (+ su ✅/⚠️ de estado) no siempre entran en una sola
         fila — "flex-wrap: wrap" las mandaba a una 2da línea que además
         quedaba tapada a medias por el botón sticky "Volver al listado" al
-        scrollear (se veía como una franja suelta, "de fondo", pedido de
-        Tom: "no crees que estan muy encimados a una linea que quedo de
-        fondo"). Nowrap + scroll horizontal (como las pestañas de un
+        scrollear. Nowrap + scroll horizontal (como las pestañas de un
         browser): nunca rompe a una 2da línea, y se llega a las que no
-        entran scrolleando el propio renglón de pestañas, no la página. */
+        entran scrolleando el propio renglón, no la página. */
         [data-testid="stTabs"] [role="tablist"] {
-            display: flex; gap: 8px; flex-wrap: nowrap; border-bottom: none !important;
-            margin-bottom: 16px; overflow-x: auto; overflow-y: hidden;
+            display: flex; gap: 4px; flex-wrap: nowrap; margin-bottom: 20px;
+            overflow-x: auto; overflow-y: hidden;
+            border-bottom: 1px solid var(--sb-border);
             scrollbar-width: thin; scrollbar-color: var(--sb-border) transparent;
         }
         [data-testid="stTabs"] [role="tablist"]::-webkit-scrollbar { height: 6px; }
@@ -303,31 +305,25 @@ __SB_VARS__
             background: var(--sb-border); border-radius: 3px;
         }
         [data-testid="stTab"] {
-            flex: 1 1 auto; min-width: 130px; justify-content: center;
-            background: var(--sb-surface) !important; border: 1px solid var(--sb-border) !important;
-            border-radius: 10px !important; padding: 12px 10px !important;
-            box-shadow: var(--sb-shadow-sm); transition: box-shadow 0.15s ease, border-color 0.15s ease;
+            flex: 0 0 auto; justify-content: center;
+            background: transparent !important; border: none !important;
+            border-bottom: 2px solid transparent !important; border-radius: 0 !important;
+            padding: 10px 18px !important; box-shadow: none !important;
+            transition: color 0.15s ease, border-color 0.15s ease;
         }
-        [data-testid="stTab"]:hover {
-            box-shadow: var(--sb-shadow-lg); border-color: var(--sb-orange) !important;
-        }
-        /* Una sola línea por pestaña (antes "normal" dejaba que las
-        etiquetas largas — "Tarifas flete y seguro", "Simulación de venta"
-        — envolvieran a 2 líneas mientras las cortas quedaban en 1: mismo
-        alto de fila pero contenido despareja, se veía irregular). El
-        scroll horizontal del tablist (ver arriba) es la red de contención
-        si alguna etiqueta no entra del todo en pantallas angostas. */
+        [data-testid="stTab"]:hover { border-bottom-color: var(--sb-border) !important; }
+        /* Una sola línea por pestaña (etiquetas largas ya no envuelven a 2
+        líneas mientras las cortas quedan en 1 — mismo alto parejo en toda
+        la fila). El scroll horizontal de arriba es la red de contención si
+        alguna etiqueta no entra del todo en pantallas angostas. */
         [data-testid="stTab"] p {
-            color: var(--sb-text-secondary) !important; font-weight: 700 !important;
-            font-size: 13px !important; white-space: nowrap !important; text-align: center;
+            color: var(--sb-text-secondary) !important; font-weight: 600 !important;
+            font-size: 13.5px !important; white-space: nowrap !important; text-align: center;
         }
-        [data-testid="stTab"][aria-selected="true"] {
-            border-color: var(--sb-orange) !important;
-            box-shadow: 0 2px 8px rgba(232, 101, 42, 0.18);
-        }
-        [data-testid="stTab"][aria-selected="true"] p { color: var(--sb-orange-dark) !important; }
+        [data-testid="stTab"][aria-selected="true"] { border-bottom-color: var(--sb-orange) !important; }
+        [data-testid="stTab"][aria-selected="true"] p { color: var(--sb-orange-dark) !important; font-weight: 700 !important; }
         /* Barrita/indicador de selección nativo de react-aria — ya no hace
-        falta, el borde+sombra de arriba cumple ese rol. */
+        falta, el subrayado de arriba cumple ese rol. */
         [data-testid="stTab"] .react-aria-SelectionIndicator { display: none !important; }
 
         /* Chips de st.pills (filtro de etapa del CRM: "Nuevos", "Contactados",
@@ -3032,12 +3028,40 @@ def _render_cotizador_editor():
     _gastos_tiene_ceros = _gastos_visibles_tiene_ceros(st.session_state.cot_gastos)
     _tarifas_incompleta = tarifa_flete == 0 or gastos_origen == 0 or gastos_locales_hdr == 0
 
-    label_datos = "📝 Datos generales" + (" ✅" if cab.get("cliente_id") else "")
-    label_productos = "📦 Productos" + (" ⚠️" if _productos_tiene_ceros else (" ✅" if _productos_listos else ""))
-    label_tarifas = "🚚 Tarifas flete y seguro" + (" ⚠️" if _tarifas_incompleta else " ✅")
-    label_costos_op = "🧾 Costos operativos" + (" ⚠️" if _gastos_tiene_ceros else " ✅")
-    label_memoria = "🧮 Memoria de cálculo" + (" ✅" if _productos_listos else "")
-    label_simulacion = "📈 Simulación de venta" + (" ✅" if _productos_listos else "")
+    # Antes el ✅/⚠️ de cada sección vivía DENTRO del texto de la pestaña
+    # (ver comentario histórico más abajo, ya obsoleto). Eso resultó ser la
+    # causa de un bug real: este componente de pestañas identifica a cada
+    # una por su TEXTO, no por posición — la key fija (cot_tabs_{cot_id})
+    # no alcanza para protegerlo. En cuanto el texto de la pestaña activa
+    # cambiaba (p.ej. Tarifas pasando de ⚠️ a ✅ al completar el último
+    # campo), esa pestaña "desaparecía" para el componente y la selección
+    # caía al default ("Datos generales") — el usuario quedaba expulsado
+    # de la sección que estaba llenando. Reproducido también en el código
+    # de antes de la restructuración de la grilla de Tarifas de hoy, así
+    # que no lo causó ese cambio — pero se soluciona en esta misma entrega
+    # porque es la misma familia de bug de UX ("inconsistencia que no se
+    # puede tolerar") que motivó el pedido de hoy.
+    #
+    # Fix: las labels de las pestañas quedan 100% estáticas (nunca
+    # cambian en la vida de la cotización) — el resumen de qué falta
+    # completar se muestra aparte, en una sola línea arriba de las
+    # pestañas, así nunca vuelve a disparar el remount/reset.
+    label_datos = "📝 Datos generales"
+    label_productos = "📦 Productos"
+    label_tarifas = "🚚 Tarifas flete y seguro"
+    label_costos_op = "🧾 Costos operativos"
+    label_memoria = "🧮 Memoria de cálculo"
+    label_simulacion = "📈 Simulación de venta"
+
+    _pendientes = []
+    if _productos_tiene_ceros:
+        _pendientes.append("Productos")
+    if _tarifas_incompleta:
+        _pendientes.append("Tarifas flete y seguro")
+    if _gastos_tiene_ceros:
+        _pendientes.append("Costos operativos")
+    if _pendientes:
+        st.caption("⚠️ Pendiente de completar: " + " · ".join(_pendientes))
 
     tab_datos, tab_productos, tab_tarifas, tab_costos_op, tab_memoria, tab_simulacion = st.tabs(
         [label_datos, label_productos, label_tarifas, label_costos_op, label_memoria, label_simulacion],
@@ -3208,102 +3232,117 @@ def _render_cotizador_editor():
     # Tarifas flete y seguro (antes 3️⃣)
     # ============================================================
     with tab_tarifas:
-        # Grilla única de 3 columnas × 3 filas — un tema por columna (Flete,
-        # Gastos, Seguro), cada una con exactamente 3 campos apilados. Antes
-        # era una fila de 3 (Flete) seguida de una fila de 2 (Gastos/Seguro)
-        # con alturas dispares entre sí — dos grillas distintas apiladas, no
-        # una sola. Pedido explícito: "hay 9 items! no es mas facil alinear
-        # 3, 3 y 3?" — un solo st.columns(3) para las 9, prolijo y alineado.
-        tf_flete, tf_gastos, tf_seguro = st.columns(3)
+        # Grilla de 3 columnas (Flete, Gastos, Seguro) armada como una
+        # secuencia de FILAS sincronizadas (un st.columns(3) por fila) en
+        # vez de un solo st.columns(3) donde cada columna apila sus campos
+        # de forma independiente. Con carteles condicionales de distinto
+        # largo por columna (ej. "No aplica (FOB/FCA)" en Gastos, nada en
+        # Seguro) la versión anterior se desalineaba apenas alguna columna
+        # tenía más o menos líneas que las otras — "los cuadros quedan
+        # desalineados" (pedido de Tom, "no se puede tolerar"). Con cada
+        # fila en su propio st.columns(3), las 3 columnas de esa fila SIEMPRE
+        # arrancan a la misma altura sin importar cuánto midió la fila
+        # anterior — el desalineamiento entre columnas queda estructuralmente
+        # imposible, no depende de contar líneas de texto a mano.
+        r1c1, r1c2, r1c3 = st.columns(3)
+        r2c1, r2c2, r2c3 = st.columns(3)
+        r3c1, r3c2, r3c3 = st.columns(3)
+        r4c1, r4c2, r4c3 = st.columns(3)
+        r5c1, r5c2, r5c3 = st.columns(3)
 
-        # --- Columna 1: Flete ---
-        tarifa_flete = tf_flete.number_input(
+        # --- Fila 1 ---
+        tarifa_flete = r1c1.number_input(
             "Tarifa flete (USD)", value=tarifa_flete, format="%.2f", step=10.0, key=tarifaflete_key,
             help="Costo total del flete pagado al forwarder/naviera.",
         )
+        if contenedor in ("FOB", "FCA"):
+            # No se cobran gastos en origen con estas dos condiciones (el
+            # exportador ya los cubre hasta el puerto de origen) — forzado a
+            # 0 igual que el resto de los campos disabled del formulario
+            # (ver nota de "Tarifa flete certificado" más abajo: un
+            # disabled=True no relee su value= solo, hay que pisar
+            # session_state a mano).
+            gastos_origen = 0.0
+            st.session_state[gastosorigen_key] = 0.0
+            r1c2.number_input(
+                "Gastos en origen (USD)", value=0.0, format="%.2f", disabled=True, key=gastosorigen_key,
+                help="No aplica con FOB/FCA — el exportador ya cubre los gastos hasta el puerto de origen.",
+            )
+        else:
+            gastos_origen = r1c2.number_input(
+                "Gastos en origen (USD)", value=gastos_origen, format="%.2f", step=10.0, key=gastosorigen_key,
+                help="Gastos EXW / en el país de origen (handling, documentación, etc.).",
+            )
+        seguro_modo_ui = r1c3.selectbox(
+            "Seguro", list(SEGURO_MODO_UI_A_DB), key=segmodo_key,
+            help="Automático: 0,3% s/FOB declarado con piso USD 75. No cobrar / Manual, a elección.",
+        )
+        seguro_modo = SEGURO_MODO_UI_A_DB.get(seguro_modo_ui, "auto")
+
+        # --- Fila 2: carteles de estado de la fila 1 (o el campo condicional
+        # de Seguro manual) — cada celda vacía si no aplica, nunca corre a
+        # las columnas vecinas de lugar. ---
         if tarifa_flete == 0:
-            tf_flete.caption("⚠️ Sin cargar")
-        pct_certificacion_input = tf_flete.number_input(
+            r2c1.caption("⚠️ Sin cargar")
+        if contenedor in ("FOB", "FCA"):
+            r2c2.caption("No aplica (FOB/FCA)")
+        elif gastos_origen == 0:
+            r2c2.caption("⚠️ Sin cargar")
+        if seguro_modo == "manual":
+            seguro_manual_usd = r2c3.number_input(
+                "Seguro manual (USD)", value=seguro_manual_usd, format="%.2f", step=10.0, key=segmanual_key,
+            )
+
+        # --- Fila 3 ---
+        pct_certificacion_input = r3c1.number_input(
             "% Certificación", value=pct_certificacion_input, format="%.2f", min_value=0.0, max_value=100.0,
             step=5.0, key=pctcert_key, help="Porción del flete certificada por la naviera para declarar en el CIF.",
         )
         pct_certificacion = pct_certificacion_input / 100
-        _cab_live.update(tarifa_flete=tarifa_flete, pct_certificacion_input=pct_certificacion_input)
+        gastos_locales_hdr = r3c2.number_input(
+            "Gastos locales (USD)", value=gastos_locales_hdr, format="%.2f", step=10.0, key=gastoslocaleshdr_key,
+            help="Gastos locales en Argentina asociados al despacho.",
+        )
+        segurohdr_key = f"segurohdr_{cot_id}"
+        st.session_state[segurohdr_key] = resultado["seguro_declarado"]
+        r3c3.number_input(
+            "Seguro (USD)", value=resultado["seguro_declarado"], format="%.2f", disabled=True,
+            key=segurohdr_key, help="= FOB total × Seguro (%) s/FOB, cargado en Datos generales.",
+        )
+
+        # --- Fila 4: cartel de estado de Gastos locales + IVA Seguro (no
+        # tiene cartel condicional, así que cierra 1 fila antes que Flete/
+        # Gastos, que sí necesitan una fila más para "...certificado"/"IVA
+        # Gastos locales"). ---
+        if gastos_locales_hdr == 0:
+            r4c2.caption("⚠️ Sin cargar")
+        pct_iva_seguro_input = r4c3.number_input(
+            "IVA Seguro (%)", value=pct_iva_seguro_input, format="%.2f", step=1.0,
+            key=pctivaseguro_key, help="% de IVA incluido en el Seguro — crédito fiscal recuperable.",
+        )
+
+        # --- Fila 5 ---
         # Los campos disabled=True no refrescan su value= en reruns posteriores
         # (Streamlit los sigue leyendo de session_state, aunque el usuario nunca
         # los toque) — se fuerza acá, mismo patrón que el auto-sync del Seguro.
         tarifafletecert_key = f"tarifafletecert_{cot_id}"
         st.session_state[tarifafletecert_key] = tarifa_flete * pct_certificacion
-        tf_flete.number_input(
+        r5c1.number_input(
             "Tarifa flete certificado (USD)", value=tarifa_flete * pct_certificacion, format="%.2f",
             disabled=True, key=tarifafletecert_key, help="= Tarifa flete × % Certificación. Se usa en el CIF.",
         )
-
-        # --- Columna 2: Gastos ---
-        if contenedor in ("FOB", "FCA"):
-            # No se cobran gastos en origen con estas dos condiciones (el
-            # exportador ya los cubre hasta el puerto de origen) — forzado a
-            # 0 igual que el resto de los campos disabled del formulario
-            # (ver nota de "Tarifa flete certificado" arriba: un disabled=True
-            # no relee su value= solo, hay que pisar session_state a mano).
-            gastos_origen = 0.0
-            st.session_state[gastosorigen_key] = 0.0
-            tf_gastos.number_input(
-                "Gastos en origen (USD)", value=0.0, format="%.2f", disabled=True, key=gastosorigen_key,
-                help="No aplica con FOB/FCA — el exportador ya cubre los gastos hasta el puerto de origen.",
-            )
-            # Antes iba en un st.caption con el texto completo — a 2 líneas
-            # desalineaba la altura de esta columna contra "% Certificación"/
-            # "Seguro" (mismo motivo que el resto de los "⚠️ Sin cargar" de
-            # acá, que sí entran en 1 línea). La explicación completa sigue
-            # disponible en el "?" del campo de arriba.
-            tf_gastos.caption("No aplica (FOB/FCA)")
-        else:
-            gastos_origen = tf_gastos.number_input(
-                "Gastos en origen (USD)", value=gastos_origen, format="%.2f", step=10.0, key=gastosorigen_key,
-                help="Gastos EXW / en el país de origen (handling, documentación, etc.).",
-            )
-            if gastos_origen == 0:
-                tf_gastos.caption("⚠️ Sin cargar")
-        gastos_locales_hdr = tf_gastos.number_input(
-            "Gastos locales (USD)", value=gastos_locales_hdr, format="%.2f", step=10.0, key=gastoslocaleshdr_key,
-            help="Gastos locales en Argentina asociados al despacho.",
-        )
-        if gastos_locales_hdr == 0:
-            tf_gastos.caption("⚠️ Sin cargar")
         # Gastos en origen no paga IVA, no hace falta editarlo — Gastos
         # locales sí, así que su % IVA (crédito fiscal recuperable) cierra
         # esta columna, junto a los montos que le dan origen.
-        pct_iva_gastoslocales_input = tf_gastos.number_input(
+        pct_iva_gastoslocales_input = r5c2.number_input(
             "IVA Gastos locales (%)", value=pct_iva_gastoslocales_input, format="%.2f", step=1.0,
             key=pctivagastoslocales_key, help="% de IVA incluido en Gastos locales — crédito fiscal recuperable.",
         )
+
         _cab_live.update(
+            tarifa_flete=tarifa_flete, pct_certificacion_input=pct_certificacion_input,
             gastos_origen=gastos_origen, gastos_locales_hdr=gastos_locales_hdr,
             pct_iva_gastoslocales_input=pct_iva_gastoslocales_input,
-        )
-
-        # --- Columna 3: Seguro ---
-        seguro_modo_ui = tf_seguro.selectbox(
-            "Seguro", list(SEGURO_MODO_UI_A_DB), key=segmodo_key,
-            help="Automático: 0,3% s/FOB declarado con piso USD 75. No cobrar / Manual, a elección.",
-        )
-        seguro_modo = SEGURO_MODO_UI_A_DB.get(seguro_modo_ui, "auto")
-        if seguro_modo == "manual":
-            seguro_manual_usd = tf_seguro.number_input(
-                "Seguro manual (USD)", value=seguro_manual_usd, format="%.2f", step=10.0, key=segmanual_key,
-            )
-        segurohdr_key = f"segurohdr_{cot_id}"
-        st.session_state[segurohdr_key] = resultado["seguro_declarado"]
-        tf_seguro.number_input(
-            "Seguro (USD)", value=resultado["seguro_declarado"], format="%.2f", disabled=True,
-            key=segurohdr_key, help="= FOB total × Seguro (%) s/FOB, cargado en Datos generales.",
-        )
-        pct_iva_seguro_input = tf_seguro.number_input(
-            "IVA Seguro (%)", value=pct_iva_seguro_input, format="%.2f", step=1.0,
-            key=pctivaseguro_key, help="% de IVA incluido en el Seguro — crédito fiscal recuperable.",
-        )
-        _cab_live.update(
             seguro_modo_ui=seguro_modo_ui, seguro_manual_usd=seguro_manual_usd,
             pct_iva_seguro_input=pct_iva_seguro_input,
         )
