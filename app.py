@@ -223,7 +223,15 @@ __SB_VARS__
         superficie propia en vez del gris por defecto de Streamlit, que no
         se adapta solo al modo oscuro. */
         [data-testid="stExpander"] {
-            background: var(--sb-surface) !important; border-color: var(--sb-border) !important;
+            background: var(--sb-surface) !important; border: 1px solid var(--sb-border) !important;
+            border-radius: 10px !important; box-shadow: var(--sb-shadow-sm);
+            margin-bottom: 10px; overflow: hidden;
+            transition: box-shadow 0.15s ease, border-color 0.15s ease;
+        }
+        /* Glow naranja al pasar el mouse — refuerza que las secciones son
+        tarjetas clickeables, no un simple acordeón gris. */
+        [data-testid="stExpander"]:hover {
+            box-shadow: var(--sb-shadow-lg); border-color: var(--sb-orange) !important;
         }
         /* El <summary> nunca tenía fondo propio (solo color de texto) — normalmente
         se ve bien porque hereda el fondo oscuro del <details> padre de arriba, pero
@@ -237,11 +245,14 @@ __SB_VARS__
         en la superficie del tema sin importar cuántas veces se vuelva a renderizar. */
         [data-testid="stExpander"] summary {
             color: var(--sb-navy) !important; background: var(--sb-surface) !important;
+            padding: 14px 18px !important; font-weight: 800 !important; font-size: 13.5px !important;
+            text-transform: uppercase; letter-spacing: 0.04em;
         }
         [data-testid="stExpander"] summary:hover, [data-testid="stExpander"] summary:focus,
         [data-testid="stExpander"] summary:focus-visible, [data-testid="stExpander"] summary:active {
             background: var(--sb-zone) !important;
         }
+        [data-testid="stExpander"] summary svg { color: var(--sb-orange) !important; }
         .stTabs [data-baseweb="tab-list"] { border-bottom-color: var(--sb-border) !important; }
         .stTabs [data-baseweb="tab"] p { color: var(--sb-text-secondary) !important; }
         .stTabs [aria-selected="true"] p { color: var(--sb-orange-dark) !important; }
@@ -2380,27 +2391,21 @@ def _sync_desde_widgets(filas, prefijos):
                 fila[campo] = st.session_state[key]
 
 
-def _fila_campos_producto(p, campos):
-    """Fila compacta para un producto con N campos numéricos en columnas cortas.
-    campos: lista de (nombre_campo, etiqueta)."""
-    uid = p["_uid"]
-    with st.container(border=True, key=f"formrow_campos_{campos[0][0]}_{uid}"):
-        cols = st.columns([2] + [1] * len(campos))
-        cols[0].markdown(f"**{p.get('descripcion') or '(sin nombre)'}**")
-        for col, (campo, etiqueta) in zip(cols[1:], campos):
-            prefijo = PROD_FIELD_PREFIX[campo]
-            p[campo] = col.number_input(etiqueta, value=_f_local(p.get(campo)), format="%.2f", key=f"{prefijo}_{uid}")
-
-
 def _mercaderia_tiene_ceros(productos):
     """True si algún producto tiene FOB Unit. o Cantidad en 0 — señal de que
     todavía falta cargar su precio, no de que el producto vale 0 a propósito."""
     return any(_f_local(p.get("fob_unit")) == 0 or _f_local(p.get("cantidad")) == 0 for p in productos)
 
 
-def _render_mercaderia():
-    """Sección 2: datos básicos de cada producto (sin impuestos ni margen).
-    Agregar un producto es opcional: la cotización arranca vacía."""
+def _render_productos():
+    """Sección 'Productos': carga de mercadería + derechos/tasa/antidumping
+    (%) + IVA/IVA Adicional/Ganancias/IIBB (%), todo en una sola tarjeta por
+    producto. Antes eran 3 secciones separadas (Detalle de mercadería,
+    Derechos/tasa/antidumping, IVA/Ganancias/IIBB+Arancel SIM) que obligaban
+    a saltar de sección para terminar de cargar un mismo producto. El merge
+    es solo de presentación: cada widget usa EXACTAMENTE la misma key que
+    tenía antes (ver PROD_FIELD_PREFIX), así que no cambia ningún dato ni
+    rompe ninguna cotización ya guardada."""
     productos = st.session_state.cot_productos
 
     if not productos:
@@ -2419,7 +2424,7 @@ def _render_mercaderia():
     borrar_idx = None
     for i, p in enumerate(productos):
         uid = p["_uid"]
-        with st.container(border=True, key=f"formrow_mercaderia_{uid}"):
+        with st.container(border=True, key=f"formrow_producto_{uid}"):
             c0, c1, c2, c3 = st.columns([3, 2, 1.3, 1.3])
             p["descripcion"] = c0.text_input("Descripción", value=p.get("descripcion", ""), key=f"pdesc_{uid}")
             p["ncm"] = c1.text_input("NCM", value=p.get("ncm", ""), key=f"pncm_{uid}")
@@ -2436,6 +2441,19 @@ def _render_mercaderia():
             c7.write("")
             if c7.button("🗑️ Eliminar", key=f"pdel_{uid}", use_container_width=True):
                 borrar_idx = i
+
+            st.markdown("**Derechos e impuestos**")
+            st.caption("Dependen del NCM de cada producto — verificá en el nomenclador vigente.")
+            d1, d2, d3, d4 = st.columns(4)
+            p["pct_derechos"] = d1.number_input("Derechos (%)", value=_f_local(p.get("pct_derechos")), format="%.2f", key=f"pder_{uid}")
+            p["pct_tasa_estadistica"] = d2.number_input("Tasa Estad. (%)", value=_f_local(p.get("pct_tasa_estadistica")), format="%.2f", key=f"ptasa_{uid}")
+            p["pct_antidumping"] = d3.number_input("Antidump. (%)", value=_f_local(p.get("pct_antidumping")), format="%.2f", key=f"panti_{uid}")
+            p["pct_iva"] = d4.number_input("IVA (%)", value=_f_local(p.get("pct_iva")), format="%.2f", key=f"piva_{uid}")
+
+            e1, e2, e3 = st.columns(3)
+            p["pct_iva_adicional"] = e1.number_input("IVA Adic. (%)", value=_f_local(p.get("pct_iva_adicional")), format="%.2f", key=f"pivaad_{uid}")
+            p["pct_ganancias"] = e2.number_input("Ganancias (%)", value=_f_local(p.get("pct_ganancias")), format="%.2f", key=f"pgcia_{uid}")
+            p["pct_iibb"] = e3.number_input("IIBB (%)", value=_f_local(p.get("pct_iibb")), format="%.2f", key=f"piibb_{uid}")
 
     if borrar_idx is not None:
         productos.pop(borrar_idx)
@@ -2456,21 +2474,6 @@ def _render_cif(resultado):
     c4.metric("CIF Declarado", money(resultado["cif_declarado"]))
 
 
-def _render_derechos():
-    """% de derechos, tasa estadística y antidumping por producto."""
-    productos = st.session_state.cot_productos
-    if not productos:
-        st.caption("Cargá productos en la sección 2 para definir sus derechos.")
-        return
-    st.caption("Dependen del NCM de cada producto — verificá en el nomenclador vigente.")
-    for p in productos:
-        _fila_campos_producto(p, [
-            ("pct_derechos", "Derechos (%)"),
-            ("pct_tasa_estadistica", "Tasa Estad. (%)"),
-            ("pct_antidumping", "Antidump. (%)"),
-        ])
-
-
 def _render_base_imponible(resultado):
     """Base imponible de IVA por producto (solo lectura)."""
     productos = resultado["productos"]
@@ -2484,21 +2487,6 @@ def _render_base_imponible(resultado):
     } for p in productos]
     _tabla_html(rows, alinear_derecha=["CIF Producto", "Derechos+Tasas+Antidump.", "Base IVA"])
     st.metric("Base IVA Total", money(resultado["base_iva_total"]))
-
-
-def _render_impuestos():
-    """% de IVA, IVA Adicional, Ganancias e IIBB por producto."""
-    productos = st.session_state.cot_productos
-    if not productos:
-        st.caption("Cargá productos en la sección 2 para definir sus impuestos.")
-        return
-    for p in productos:
-        _fila_campos_producto(p, [
-            ("pct_iva", "IVA (%)"),
-            ("pct_iva_adicional", "IVA Adic. (%)"),
-            ("pct_ganancias", "Ganancias (%)"),
-            ("pct_iibb", "IIBB (%)"),
-        ])
 
 
 def _gastos_visibles_tiene_ceros(gastos):
@@ -2535,9 +2523,10 @@ def _render_gastos():
         titulo = g.get("concepto") or f"Gasto {n + 1} (sin nombre)"
         if _f_local(g.get("monto")) == 0:
             titulo = f"⚠️ {titulo} — sin monto cargado"
-        # key fija — mismo motivo que en 2️⃣, 3️⃣ y 8️⃣: el título de cada gasto
-        # cambia con el ⚠️ apenas se completa el monto, y sin key eso hace que
-        # la fila se cierre sola en pleno tipeo.
+        # key fija — mismo motivo que en Productos, Tarifas flete y seguro y
+        # Costos operativos: el título de cada gasto cambia con el ⚠️ apenas
+        # se completa el monto, y sin key eso hace que la fila se cierre
+        # sola en pleno tipeo.
         with st.expander(f"{n + 1}. {titulo}", expanded=False, key=f"exp_gasto_{uid}"):
             c1, c2, c3 = st.columns(3)
             g["concepto"] = c1.text_input("Concepto", value=g.get("concepto", ""), key=f"gcon_{uid}")
@@ -2631,9 +2620,9 @@ def _render_cotizador_editor():
     st.subheader(f"Cotización {cab['numero']}")
 
     # ============================================================
-    # 1️⃣ Datos generales de la cotización
+    # Datos generales de la cotización (antes 1️⃣)
     # ============================================================
-    with st.expander("1️⃣ Datos generales de la cotización", expanded=False):
+    with st.expander("Datos generales de la cotización", expanded=False, icon=":material/description:"):
         # Las keys incluyen cot_id para que, al cambiar de cotización, Streamlit
         # trate cada widget como uno nuevo y tome los valores recién cargados en
         # lugar de conservar el valor tipeado para la cotización anterior.
@@ -2683,15 +2672,15 @@ def _render_cotizador_editor():
 
             st.form_submit_button("💾 Guardar datos generales")
 
-    # El Arancel SIM se carga en la sección 6 (junto a IVA/Ganancias/IIBB, como
-    # en el Excel), pero necesitamos su valor actual ya acá para poder
-    # calcular una sola vez. Como todavía no se renderizó ese widget en esta
-    # pasada, se lee directamente de session_state (ver _sync_desde_widgets).
+    # El Arancel SIM se carga en "Costos operativos", pero necesitamos su
+    # valor actual ya acá para poder calcular una sola vez. Como todavía no
+    # se renderizó ese widget en esta pasada, se lee directamente de
+    # session_state (ver _sync_desde_widgets).
     arancel_key = f"arancel_{cot_id}"
     arancel_sim = st.session_state.get(arancel_key, float(cab.get("arancel_sim") or 10))
 
-    # Tarifas flete (sección 3): mismo patrón de prefetch que el Arancel SIM
-    # — se lee el último valor tipeado desde session_state antes de calcular,
+    # Tarifas flete y seguro: mismo patrón de prefetch que el Arancel SIM —
+    # se lee el último valor tipeado desde session_state antes de calcular,
     # aunque esos widgets recién se dibujen más abajo en la página.
     tarifaflete_key = f"tarifaflete_{cot_id}"
     pctcert_key = f"pctcert_{cot_id}"
@@ -2773,18 +2762,18 @@ def _render_cotizador_editor():
     resultado = calculo.calcular(cab_calc, productos_list, gastos_list)
 
     # ============================================================
-    # Resumen fijo arriba de todo: antes había que abrir las 10 secciones
-    # una por una hasta llegar a "9️⃣ Resultado" (al final) para ver el
-    # número que en realidad importa acá. Estos 3 valores son EXACTAMENTE
-    # los mismos que van a aparecer más abajo en esa sección — mismo
-    # diccionario "resultado", ningún cálculo nuevo — solo se muestran
-    # también acá arriba, sin obligar a abrir nada.
+    # Resumen fijo arriba de todo: antes había que abrir varias secciones
+    # una por una hasta llegar a "Resultado de la operación" (dentro de
+    # "Memoria de cálculo") para ver el número que en realidad importa acá.
+    # Estos 3 valores son EXACTAMENTE los mismos que van a aparecer más
+    # abajo en esa sección — mismo diccionario "resultado", ningún cálculo
+    # nuevo — solo se muestran también acá arriba, sin obligar a abrir nada.
     #
     # A propósito NO incluye venta/ganancia/rentabilidad: este resumen es
     # el costeo de la importación (lo que se paga), no el negocio de venta
-    # — eso es responsabilidad del vendedor y vive solo en "🔟 Simulación
-    # de venta". Los 3 ítems (Costo FOB, Costo Final, Incidencia s/FOB)
-    # son un pedido explícito del dueño de la app, en USD.
+    # — eso es responsabilidad del vendedor y vive solo en "Simulación de
+    # venta". Los 3 ítems (Costo FOB, Costo Final, Incidencia s/FOB) son un
+    # pedido explícito del dueño de la app, en USD.
     # ============================================================
     with st.container(border=True, key=f"resultgroup_resumentop_{cot_id}"):
         st.markdown('<div class="sb-card-title">📊 Resumen de costeo</div>', unsafe_allow_html=True)
@@ -2794,29 +2783,30 @@ def _render_cotizador_editor():
         r3.metric("Incidencia s/FOB", pct(resultado["incidencia_fob"]))
 
     # ============================================================
-    # 2️⃣ Detalle de mercadería y precios
+    # Productos (mercadería + derechos/tasa/antidumping + IVA/IVA Adic./
+    # Ganancias/IIBB — antes eran 3 secciones separadas: 2️⃣, 5️⃣ y 7️⃣)
     # ============================================================
-    titulo_mercaderia = "2️⃣ Detalle de mercadería y precios"
+    titulo_productos = "Productos"
     if _mercaderia_tiene_ceros(st.session_state.cot_productos):
-        titulo_mercaderia += " ⚠️ hay ítems sin cargar"
+        titulo_productos += " ⚠️ hay ítems sin cargar"
     # key fija: sin esto, Streamlit identifica al expander por su TEXTO — al
     # agregar/completar un producto el título cambia (aparece o desaparece el
     # "⚠️"), Streamlit lo trata como un widget distinto y lo vuelve a
     # colapsar solo, aunque el usuario lo hubiera dejado abierto. Con key
     # fija el estado abierto/cerrado se sigue por esa key, no por el
     # texto, y sobrevive el cambio de título.
-    with st.expander(titulo_mercaderia, expanded=False, key=f"exp_mercaderia_{cot_id}"):
-        _render_mercaderia()
+    with st.expander(titulo_productos, expanded=False, key=f"exp_productos_{cot_id}", icon=":material/inventory_2:"):
+        _render_productos()
 
     # ============================================================
-    # 3️⃣ Tarifas flete
+    # Tarifas flete y seguro (antes 3️⃣)
     # ============================================================
-    titulo_tarifas = "3️⃣ Tarifas flete"
+    titulo_tarifas = "Tarifas flete y seguro"
     if tarifa_flete == 0 or gastos_origen == 0 or gastos_locales_hdr == 0:
         titulo_tarifas += " ⚠️ hay ítems sin cargar"
-    # key fija — mismo motivo que en 2️⃣: el título cambia con el ⚠️, y sin
-    # key eso hace que se cierre solo apenas se completa el último campo.
-    with st.expander(titulo_tarifas, expanded=False, key=f"exp_tarifas_{cot_id}"):
+    # key fija — mismo motivo que en Productos: el título cambia con el ⚠️, y
+    # sin key eso hace que se cierre solo apenas se completa el último campo.
+    with st.expander(titulo_tarifas, expanded=False, key=f"exp_tarifas_{cot_id}", icon=":material/local_shipping:"):
         tf1, tf2, tf3 = st.columns(3)
         tarifa_flete = tf1.number_input(
             "Tarifa flete (USD)", value=tarifa_flete, format="%.2f", step=10.0, key=tarifaflete_key,
@@ -2896,48 +2886,34 @@ def _render_cotizador_editor():
         )
 
     # ============================================================
-    # 4️⃣ Valor CIF
+    # Costos operativos (antes 8️⃣, + Arancel SIM que antes vivía en 7️⃣)
     # ============================================================
-    with st.expander("4️⃣ Valor CIF", expanded=False):
-        _render_cif(resultado)
-
-    # ============================================================
-    # 5️⃣ Derechos, tasa estadística y antidumping
-    # ============================================================
-    with st.expander("5️⃣ Derechos, tasa estadística y antidumping (%)", expanded=False):
-        _render_derechos()
-
-    # ============================================================
-    # 6️⃣ Base imponible para IVA
-    # ============================================================
-    with st.expander("6️⃣ Base imponible para el cálculo de IVA", expanded=False):
-        _render_base_imponible(resultado)
-
-    # ============================================================
-    # 7️⃣ IVA, IVA Adicional, Ganancias, IIBB + Arancel SIM
-    # ============================================================
-    with st.expander("7️⃣ IVA, IVA Adicional, Ganancias e IIBB (%) + Arancel SIM", expanded=False):
+    titulo_costos_op = "Costos operativos"
+    if _gastos_visibles_tiene_ceros(st.session_state.cot_gastos):
+        titulo_costos_op += " ⚠️ hay ítems sin cargar"
+    # key fija — mismo motivo que en Productos y Tarifas flete y seguro.
+    with st.expander(titulo_costos_op, expanded=False, key=f"exp_costos_op_{cot_id}", icon=":material/receipt_long:"):
         arancel_sim = st.number_input(
             "Arancel SIM (USD)", value=arancel_sim, step=1.0, key=arancel_key,
             help="Costo fijo del Sistema Informático María (trámite aduanero), no depende del producto.",
         )
-        _render_impuestos()
-
-    # ============================================================
-    # 8️⃣ Costos operativos
-    # ============================================================
-    titulo_costos_op = "8️⃣ Costos operativos"
-    if _gastos_visibles_tiene_ceros(st.session_state.cot_gastos):
-        titulo_costos_op += " ⚠️ hay ítems sin cargar"
-    # key fija — mismo motivo que en 2️⃣ y 3️⃣.
-    with st.expander(titulo_costos_op, expanded=False, key=f"exp_costos_op_{cot_id}"):
         _render_gastos()
 
     # ============================================================
-    # 9️⃣ Resultado de la operación (costo puro — sin venta ni margen,
-    # eso vive en "Simulación de venta")
+    # Memoria de cálculo (auditoría — solo lectura). Merge de: 4️⃣ Valor CIF,
+    # 6️⃣ Base imponible para IVA y 9️⃣ Resultado de la operación (costo puro
+    # — sin venta ni margen, eso vive en "Simulación de venta").
     # ============================================================
-    with st.expander("9️⃣ Resultado de la operación (costos)", expanded=False):
+    with st.expander("Memoria de cálculo (auditoría — solo lectura)", expanded=False, icon=":material/calculate:"):
+        st.markdown("**Valor CIF**")
+        _render_cif(resultado)
+
+        st.divider()
+        st.markdown("**Base imponible para el cálculo de IVA**")
+        _render_base_imponible(resultado)
+
+        st.divider()
+        st.markdown("**Resultado de la operación**")
         with st.container(border=True, key=f"resultgroup_desembolso_{cot_id}"):
             st.markdown('<div class="sb-card-title">💰 Desembolso total</div>', unsafe_allow_html=True)
             d1, d2 = st.columns(2)
@@ -2977,10 +2953,10 @@ def _render_cotizador_editor():
                 st.warning(f"⚠️ Diferencia de redondeo en el check: {money(check)}")
 
     # ============================================================
-    # 🔟 Simulación de venta (todo lo que es venta, margen y ganancia
-    # estimada vive acá, no en "Resultado de la operación")
+    # Simulación de venta (antes 🔟 — todo lo que es venta, margen y
+    # ganancia estimada vive acá, no en "Memoria de cálculo")
     # ============================================================
-    with st.expander("🔟 Simulación de venta", expanded=False):
+    with st.expander("Simulación de venta", expanded=False, icon=":material/trending_up:"):
         with st.container(border=True, key=f"resultgroup_venta_{cot_id}"):
             st.markdown('<div class="sb-card-title">📈 Resultado estimado de la venta</div>', unsafe_allow_html=True)
             v1, v2, v3 = st.columns(3)
@@ -2993,8 +2969,8 @@ def _render_cotizador_editor():
 
         tc_venta = st.number_input(
             "TC Venta (ARS, para la simulación)", value=tc_venta, step=1.0, key=tcventa_key,
-            help="Tasa a la que se estima cobrar la venta — informativo, no afecta el costo (secciones 4️⃣ a 9️⃣). "
-                 "En 0, PV Final y Ganancia (ARS) por producto dan $0.",
+            help="Tasa a la que se estima cobrar la venta — informativo, no afecta el costo (Tarifas flete y "
+                 "seguro, Costos operativos y Memoria de cálculo). En 0, PV Final y Ganancia (ARS) por producto dan $0.",
         )
         _render_simulacion_venta(resultado)
 
