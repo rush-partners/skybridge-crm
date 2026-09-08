@@ -58,6 +58,11 @@ def _inyectar_estilos():
             # oscuro/saturado y el texto más claro, mismo criterio que el
             # resto de los tokens (invertir peso, no repetir el valor claro).
             "danger": "#F87171", "danger-bg": "#3F1D1D",
+            # Verde de "viable" (badge de Simulación de venta) — mismo
+            # criterio que el rojo de arriba: más oscuro/saturado en modo
+            # oscuro para que se distinga contra --sb-surface, no el mismo
+            # verde pastel que en modo claro.
+            "success": "#4ADE80", "success-bg": "#132A1C",
             # Sombra de elevación de las cards — iba hardcodeada en rgba(15,
             # 23, 42, ...) (un navy casi negro) en los 4 lugares que la usan,
             # así que en modo oscuro quedaba prácticamente invisible contra
@@ -74,6 +79,7 @@ def _inyectar_estilos():
             "text-secondary": "#64748B", "border": "#E2E8F0",
             "surface": "#FFFFFF", "zone": "#F1F5F9", "bg": "#F8FAFC",
             "danger": "#DC2626", "danger-bg": "#FEE2E2",
+            "success": "#16A34A", "success-bg": "#DCFCE7",
             "shadow": "0 1px 3px rgba(15, 23, 42, 0.08), 0 1px 2px rgba(15, 23, 42, 0.04)",
             "shadow-sm": "0 1px 4px rgba(0, 0, 0, 0.08)",
             "shadow-lg": "0 4px 24px rgba(15, 23, 42, 0.10), 0 1px 3px rgba(15, 23, 42, 0.06)",
@@ -605,6 +611,38 @@ __SB_VARS__
         .sb-card-line {
             font-size: 12px; color: var(--sb-text-secondary); line-height: 1.45; margin: 0;
             white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+        }
+
+        /* Simulación de venta (rediseño): el costo queda anclado en USD
+        como cifra principal, con el ARS como referencia chica debajo —
+        antes las dos monedas se mostraban como dos st.metric del mismo
+        tamaño lado a lado, compitiendo por la atención (el pedido de Tom
+        fue justamente sacar esa sensación de "todo mezclado"). */
+        .sb-venta-label {
+            font-size: 11px; font-weight: 700; text-transform: uppercase;
+            letter-spacing: 0.05em; color: var(--sb-text-secondary); margin-bottom: 4px;
+        }
+        .sb-venta-sublabel {
+            font-size: 11px; font-weight: 400; text-transform: none;
+            letter-spacing: normal; color: var(--sb-text-secondary);
+        }
+        .sb-venta-costo-usd { font-size: 1.4rem; font-weight: 800; color: var(--sb-navy); line-height: 1.25; }
+        .sb-venta-costo-ars { font-size: 12px; color: var(--sb-text-secondary); margin: 2px 0 6px 0; }
+        .sb-venta-margen-ok { color: var(--sb-success); font-weight: 700; }
+        .sb-venta-margen-bad { color: var(--sb-danger); font-weight: 700; }
+        .sb-venta-badge {
+            display: inline-block; padding: 3px 10px; border-radius: 999px;
+            font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em;
+        }
+        .sb-venta-badge-ok { background: var(--sb-success-bg); color: var(--sb-success); }
+        .sb-venta-badge-bad { background: var(--sb-danger-bg); color: var(--sb-danger); }
+        .sb-venta-badge-neutral { background: var(--sb-zone); color: var(--sb-text-secondary); }
+        /* Selector de moneda (st.pills) de cada precio: el tamaño por
+        defecto de los chips es de nivel "filtro de página" (ver "Etapa" en
+        Contactos) — acá hay 2 por fila x 2 filas por producto, así que se
+        achica para que no le gane peso visual al número. */
+        [class*="st-key-pvmerc_moneda_"] button, [class*="st-key-pvfin_moneda_"] button {
+            padding: 2px 10px !important; font-size: 11px !important; min-height: 26px !important;
         }
 
         /* Header ejecutivo de la ficha de cliente: banner tipo tarjeta con
@@ -2394,7 +2432,11 @@ PROD_FIELD_PREFIX = {
     "fob_decl_unit": "pfobd", "peso_kg": "ppesokg", "volumen_m3": "pvolm3",
     "pct_derechos": "pder", "pct_tasa_estadistica": "ptasa", "pct_antidumping": "panti",
     "pct_iva": "piva", "pct_iva_adicional": "pivaad", "pct_ganancias": "pgcia", "pct_iibb": "piibb",
-    "margen_pct": "pmargen", "pv_final_usd": "pvfin",
+    "margen_pct": "pmargen",
+    # pv_final_usd / pv_mercado_usd NO van acá: se pueden tipear en USD o
+    # en ARS (selector de moneda en "Simulación de venta") así que su
+    # sincronización necesita convertir, no solo copiar — ver
+    # PRECIO_VENTA_PREFIJOS / _prefetch_precios_venta más abajo.
 }
 GASTO_FIELD_PREFIX = {
     "concepto": "gcon", "moneda": "gmon", "monto": "gmonto",
@@ -2494,6 +2536,54 @@ def _sync_desde_widgets(filas, prefijos):
             key = f"{prefijo}_{uid}"
             if key in st.session_state:
                 fila[campo] = st.session_state[key]
+
+
+# Precio de venta en Arg (Mercado) y Precio de venta estimado (Final):
+# cada uno se puede tipear en USD o en ARS — hay clientes que dan su
+# precio de referencia en una moneda y otros en la otra (ver
+# _campo_precio_venta, sección "Simulación de venta"). El valor tecleado
+# vive en su propia key (prefijo + "_val_" + uid) junto con la moneda
+# elegida (prefijo + "_moneda_" + uid); acá se convierte a USD, que sigue
+# siendo el único dato que calculo.py conoce (pv_mercado_usd/pv_final_usd,
+# sin cambios en ese archivo).
+PRECIO_VENTA_PREFIJOS = {"pv_mercado_usd": "pvmerc", "pv_final_usd": "pvfin"}
+
+
+def _prefetch_precios_venta(productos, tc_venta):
+    """Mismo motivo que _sync_desde_widgets (evitar que la sección quede un
+    render atrasada), pero con conversión de moneda en vez de copia directa."""
+    for p in productos:
+        uid = p["_uid"]
+        for campo_usd, prefijo in PRECIO_VENTA_PREFIJOS.items():
+            val_key = f"{prefijo}_val_{uid}"
+            if val_key not in st.session_state:
+                continue  # todavía no se renderizó ese widget ni una vez
+            valor = _f_local(st.session_state[val_key])
+            moneda = st.session_state.get(f"{prefijo}_moneda_{uid}", "USD")
+            if moneda == "ARS":
+                p[campo_usd] = (valor / tc_venta) if tc_venta else 0.0
+            else:
+                p[campo_usd] = valor
+
+
+def _convertir_moneda_precio(prefijo, uid, tc_venta):
+    """on_change del selector de moneda (USD/ARS) de un precio de venta:
+    convierte el número YA cargado a la moneda recién elegida, para que no
+    se pierda ni quede pegado el mismo número con otra etiqueta (ej. "14"
+    interpretado de golpe como ARS en vez de USD). Corre ANTES del rerun
+    que dibuja el number_input, así que alcanza con pisar su session_state."""
+    val_key = f"{prefijo}_val_{uid}"
+    moneda_key = f"{prefijo}_moneda_{uid}"
+    prev_key = f"{prefijo}_moneda_prev_{uid}"
+    nueva = st.session_state.get(moneda_key, "USD")
+    previa = st.session_state.get(prev_key, "USD")
+    if nueva != previa:
+        valor_actual = _f_local(st.session_state.get(val_key))
+        if previa == "USD" and nueva == "ARS":
+            st.session_state[val_key] = round(valor_actual * tc_venta, 2) if tc_venta else 0.0
+        elif previa == "ARS" and nueva == "USD":
+            st.session_state[val_key] = round(valor_actual / tc_venta, 2) if tc_venta else 0.0
+    st.session_state[prev_key] = nueva
 
 
 def _mercaderia_tiene_ceros(productos):
@@ -2666,49 +2756,109 @@ def _render_gastos():
         st.rerun()
 
 
-def _render_simulacion_venta(resultado):
+def _campo_precio_venta(col, prefijo, p, campo_usd, uid, tc_venta, titulo, subtitulo, margen, help_txt):
+    """Un precio de venta (Mercado o Estimado): selector de moneda (USD/ARS,
+    pedido explícito de Tom — "hay productos que se venden en ARS y otros en
+    USD, o los precios de referencia que trae el cliente algunas veces son
+    en ARS y otras en USD") + el número en la moneda elegida + su conversión
+    a la otra moneda como referencia chica debajo + el margen vs. costo de
+    ESE precio en particular."""
+    moneda_key = f"{prefijo}_moneda_{uid}"
+    val_key = f"{prefijo}_val_{uid}"
+
+    col.markdown(
+        f'<div class="sb-venta-label">{titulo} <span class="sb-venta-sublabel">· {subtitulo}</span></div>',
+        unsafe_allow_html=True,
+    )
+    moneda = col.pills(
+        "Moneda", options=["USD", "ARS"], default="USD", key=moneda_key, required=True,
+        label_visibility="collapsed", on_change=_convertir_moneda_precio, args=(prefijo, uid, tc_venta),
+    )
+    valor_actual = _f_local(st.session_state[val_key]) if val_key in st.session_state else _f_local(p.get(campo_usd))
+    valor = col.number_input(
+        f"Precio ({moneda})", value=valor_actual, format="%.2f",
+        key=val_key, help=help_txt, label_visibility="collapsed",
+    )
+    if moneda == "USD":
+        otra = valor * tc_venta if tc_venta else 0.0
+        col.markdown(f'<div class="sb-venta-costo-ars">≈ {money(otra, "ARS")}</div>', unsafe_allow_html=True)
+    else:
+        otra = valor / tc_venta if tc_venta else 0.0
+        col.markdown(f'<div class="sb-venta-costo-ars">≈ {money(otra)}</div>', unsafe_allow_html=True)
+
+    if margen is None:
+        col.markdown('<div class="sb-venta-sublabel">Sin precio cargado</div>', unsafe_allow_html=True)
+    else:
+        clase = "sb-venta-margen-ok" if margen >= 0 else "sb-venta-margen-bad"
+        col.markdown(
+            f'<div class="sb-venta-sublabel">Margen vs. costo: <span class="{clase}">{pct(margen)}</span></div>',
+            unsafe_allow_html=True,
+        )
+
+
+def _render_simulacion_venta(resultado, tc_venta):
     """Costo, precio de venta en Arg (referencia de mercado) y precio de
-    venta estimado por producto, en USD y ARS, con el único % de margen que
-    importa acá: el real, entre el costo final unitario y el precio de
-    venta estimado. Pedido explícito del dueño de la app (mirado como
-    consultor de ventas/desarrollo comercial): antes había un "Margen (%)"
-    editable que solo servía para sugerir un precio (PV sugerido) — dos
-    números de margen a la vez (el deseado y el real) confundían más de lo
-    que ayudaban. Se saca ese campo y el PV sugerido de la UI; calculo.py
-    los sigue calculando igual (nadie tocó ese archivo, compatibilidad con
-    cotizaciones ya guardadas), simplemente ya no se muestran acá."""
+    venta estimado por producto — rediseño pedido por Tom (frontera
+    comercial/UX, screenshots aprobados): antes USD y ARS competían con el
+    mismo peso visual en cada renglón y no había ninguna lectura directa de
+    "¿me conviene importar esto?". Acá el costo queda anclado en USD (la
+    moneda "real" del resto del costeo) con el ARS como referencia chica
+    debajo — mismo criterio que .sb-fichahdr-nombre/datos (un valor grande +
+    uno chico, no dos metrics del mismo tamaño); cada precio de venta
+    muestra su propio margen vs. costo; y arriba de cada producto hay una
+    sola señal (✅ Viable / 🔴 No viable) usando el mejor margen disponible
+    (prioriza el precio estimado — "tu plan" — sobre el de mercado cuando
+    hay los dos cargados; margen ≥ 0% = viable, ajustable si Tom quiere un
+    piso más exigente).
+
+    Antes había un "Margen (%)" editable que solo servía para sugerir un
+    precio (PV sugerido) — se sacó de la UI en una vuelta anterior; calculo.py
+    lo sigue calculando igual (compatibilidad con cotizaciones ya guardadas),
+    simplemente no se muestra acá."""
     productos = st.session_state.cot_productos
     if not productos:
         st.caption("No hay productos cargados.")
         return
     for p, r in zip(productos, resultado["productos"]):
         uid = p["_uid"]
+        costo = r["costo_civa_unit"]
+        pv_final = r["pv_final_usd"]
+        pv_mercado = r["pv_mercado_usd"]
+        margen_estimado = r["margen_real_pct"] if pv_final > 0 else None
+        # margen del precio de mercado: no lo calcula calculo.py (ese precio
+        # es informativo, no entra al motor) — se deriva acá mismo, con el
+        # mismo costo unitario que ya calculó calculo.py, sin tocar ese archivo.
+        margen_mercado = ((pv_mercado - costo) / costo) if (costo > 0 and pv_mercado > 0) else None
+        margen_relevante = margen_estimado if margen_estimado is not None else margen_mercado
+
+        if margen_relevante is None:
+            badge = '<span class="sb-venta-badge sb-venta-badge-neutral">SIN PRECIO CARGADO</span>'
+        elif margen_relevante >= 0:
+            badge = '<span class="sb-venta-badge sb-venta-badge-ok">✅ VIABLE</span>'
+        else:
+            badge = '<span class="sb-venta-badge sb-venta-badge-bad">🔴 NO VIABLE</span>'
+
         with st.container(border=True, key=f"formrow_venta_{uid}"):
-            st.markdown(f"**{p.get('descripcion') or '(sin nombre)'}**")
+            hdr_l, hdr_r = st.columns([3, 1])
+            hdr_l.markdown(f"**{p.get('descripcion') or '(sin nombre)'}**")
+            hdr_r.markdown(f'<div style="text-align:right">{badge}</div>', unsafe_allow_html=True)
 
-            c1, c2, c3 = st.columns(3)
-            c1.metric("Costo del producto (USD)", money(r["costo_civa_unit"]))
-            c2.metric("Costo del producto (ARS)", money(r["costo_civa_unit_ars"], "ARS"))
-            c3.metric(
-                "% Margen", pct(r["margen_real_pct"]),
-                help="(Precio de venta estimado − Costo del producto) / Costo del producto",
-            )
+            costo_col, merc_col, fin_col = st.columns(3)
 
-            d1, d2 = st.columns(2)
-            # Informativo (referencia de precio de mercado/competencia en
-            # Argentina): no entra en ningún cálculo de costo ni de margen.
-            p["pv_mercado_usd"] = d1.number_input(
-                "Precio de venta en Arg (USD)", value=_f_local(p.get("pv_mercado_usd")), format="%.2f",
-                key=f"pvmerc_{uid}", help="Precio de referencia de mercado/competencia en Argentina — informativo, no afecta ningún cálculo.",
-            )
-            d2.metric("Precio de venta en Arg (ARS)", money(r["pv_mercado_ars"], "ARS"))
+            costo_col.markdown('<div class="sb-venta-label">Costo del producto</div>', unsafe_allow_html=True)
+            costo_col.markdown(f'<div class="sb-venta-costo-usd">{money(costo)}</div>', unsafe_allow_html=True)
+            costo_col.markdown(f'<div class="sb-venta-costo-ars">≈ {money(r["costo_civa_unit_ars"], "ARS")}</div>', unsafe_allow_html=True)
 
-            e1, e2 = st.columns(2)
-            p["pv_final_usd"] = e1.number_input(
-                "Precio de venta estimado (USD)", value=_f_local(p.get("pv_final_usd")), format="%.2f",
-                key=f"pvfin_{uid}", help="Precio al que planeás vender este producto — dejalo en 0 si todavía no lo definiste.",
+            _campo_precio_venta(
+                merc_col, "pvmerc", p, "pv_mercado_usd", uid, tc_venta,
+                titulo="Precio de venta en Arg", subtitulo="referencia de mercado", margen=margen_mercado,
+                help_txt="Precio de referencia de mercado/competencia en Argentina — informativo, no afecta ningún cálculo. Se puede cargar en USD o en ARS.",
             )
-            e2.metric("Precio de venta estimado (ARS)", money(r["pv_final_ars"], "ARS"))
+            _campo_precio_venta(
+                fin_col, "pvfin", p, "pv_final_usd", uid, tc_venta,
+                titulo="Precio de venta estimado", subtitulo="tu plan", margen=margen_estimado,
+                help_txt="Precio al que planeás vender este producto — dejalo en 0 si todavía no lo definiste. Se puede cargar en USD o en ARS.",
+            )
 
 
 def _volver_a_historial():
@@ -2750,6 +2900,20 @@ def _render_cotizador_editor():
 
     st.subheader(f"Cotización {cab['numero']}")
 
+    # Red de contención para los campos numéricos de esta pantalla (TC
+    # Tributos/Operativos/Venta, Tarifa flete, Gastos, Seguro, etc.): en
+    # ciertos reruns (confirmado con el toggle de modo oscuro del sidebar,
+    # sin ningún error en pantalla) Streamlit pierde el valor que tenían en
+    # session_state y sus widgets vuelven a su default (0) — eso se notaba
+    # como "Venta total estimada (ARS)"/"Ganancia bruta (ARS)"/el costo en
+    # ARS de cada producto cayendo a $0 de la nada. Este dict, guardado bajo
+    # una key propia (no la de ningún widget, así que no le pega lo que sea
+    # que le pega a esas), guarda el último valor bueno de cada campo — cada
+    # widget lo usa como default en lugar de leer directo de session_state o
+    # del valor guardado en la base, y se actualiza solo apenas el widget
+    # correspondiente se renderiza.
+    _cab_live = st.session_state.setdefault(f"cab_live_{cot_id}", {})
+
     # El Arancel SIM se carga en "Costos operativos", pero necesitamos su
     # valor actual ya acá para poder calcular una sola vez. Como todavía no
     # se renderizó ese widget en esta pasada, se lee directamente de
@@ -2767,15 +2931,22 @@ def _render_cotizador_editor():
     segmodo_key = f"segmodo_{cot_id}"
     segmanual_key = f"segmanual_{cot_id}"
     tcventa_key = f"tcventa_{cot_id}"
-    tarifa_flete = st.session_state.get(tarifaflete_key, float(cab.get("tarifa_flete") or 0))
-    pct_certificacion_input = st.session_state.get(pctcert_key, float(cab.get("pct_certificacion") or 0.5) * 100)
-    gastos_origen = st.session_state.get(gastosorigen_key, float(cab.get("gastos_origen") or 0))
-    gastos_locales_hdr = st.session_state.get(gastoslocaleshdr_key, float(cab.get("gastos_locales_hdr") or 0))
+    tarifa_flete = st.session_state.get(
+        tarifaflete_key, _cab_live.get("tarifa_flete", float(cab.get("tarifa_flete") or 0)))
+    pct_certificacion_input = st.session_state.get(
+        pctcert_key, _cab_live.get("pct_certificacion_input", float(cab.get("pct_certificacion") or 0.5) * 100))
+    gastos_origen = st.session_state.get(
+        gastosorigen_key, _cab_live.get("gastos_origen", float(cab.get("gastos_origen") or 0)))
+    gastos_locales_hdr = st.session_state.get(
+        gastoslocaleshdr_key, _cab_live.get("gastos_locales_hdr", float(cab.get("gastos_locales_hdr") or 0)))
     seguro_modo_ui = st.session_state.get(
-        segmodo_key, SEGURO_MODO_DB_A_UI.get(cab.get("seguro_modo") or "auto", "Automático"))
-    seguro_manual_usd = st.session_state.get(segmanual_key, float(cab.get("seguro_manual_usd") or 0))
+        segmodo_key,
+        _cab_live.get("seguro_modo_ui", SEGURO_MODO_DB_A_UI.get(cab.get("seguro_modo") or "auto", "Automático")),
+    )
+    seguro_manual_usd = st.session_state.get(
+        segmanual_key, _cab_live.get("seguro_manual_usd", float(cab.get("seguro_manual_usd") or 0)))
     seguro_modo = SEGURO_MODO_UI_A_DB.get(seguro_modo_ui, "auto")
-    tc_venta = st.session_state.get(tcventa_key, float(cab.get("tc_venta") or 0))
+    tc_venta = st.session_state.get(tcventa_key, _cab_live.get("tc_venta", float(cab.get("tc_venta") or 0)))
     pct_certificacion = pct_certificacion_input / 100
 
     # % IVA de Gastos locales y Seguro: son los únicos 2 de los 4 gastos
@@ -2787,9 +2958,16 @@ def _render_cotizador_editor():
     pctivaseguro_key = f"pctivaseguro_{cot_id}"
     pctivagastoslocales_key = f"pctivagastoslocales_{cot_id}"
     pct_iva_seguro_input = st.session_state.get(
-        pctivaseguro_key, _f_local(_gasto_seguro.get("pct_iva")) if _gasto_seguro else 21.0)
+        pctivaseguro_key,
+        _cab_live.get("pct_iva_seguro_input", _f_local(_gasto_seguro.get("pct_iva")) if _gasto_seguro else 21.0),
+    )
     pct_iva_gastoslocales_input = st.session_state.get(
-        pctivagastoslocales_key, _f_local(_gasto_gastoslocales.get("pct_iva")) if _gasto_gastoslocales else 21.0)
+        pctivagastoslocales_key,
+        _cab_live.get(
+            "pct_iva_gastoslocales_input",
+            _f_local(_gasto_gastoslocales.get("pct_iva")) if _gasto_gastoslocales else 21.0,
+        ),
+    )
 
     # ============================================================
     # Navegación por pestañas — reemplaza al stepper puramente informativo
@@ -2883,20 +3061,34 @@ def _render_cotizador_editor():
             eta_date = c8.date_input("ETA", value=_parse_fecha(cab.get("freetime")), key=f"freetime_{cot_id}", format="DD/MM/YYYY")
             carrier = etd_date.isoformat() if etd_date else None
             freetime = eta_date.isoformat() if eta_date else None
-            tc_tributos = c9.number_input("TC Tributos (despacho)", value=float(cab.get("tc_tributos") or 0), step=1.0, key=f"tctrib_{cot_id}")
+            tc_tributos = c9.number_input(
+                "TC Tributos (despacho)",
+                value=_cab_live.get("tc_tributos", float(cab.get("tc_tributos") or 0)),
+                step=1.0, key=f"tctrib_{cot_id}",
+            )
 
             c10, c11, c12 = st.columns(3)
             cf_pct_input = c10.number_input(
-                "Costo financiero (%) s/FOB", value=float(cab.get("costo_financiero_pct") or 0.025) * 100,
+                "Costo financiero (%) s/FOB",
+                value=_cab_live.get("cf_pct_input", float(cab.get("costo_financiero_pct") or 0.025) * 100),
                 format="%.2f", step=0.1, key=f"cfpct_{cot_id}", help="Ej: escribí 2.5 para 2,5%",
             )
             seguro_pct_input = c11.number_input(
-                "Seguro (%) s/FOB", value=float(cab.get("seguro_pct") or 0.003) * 100,
+                "Seguro (%) s/FOB",
+                value=_cab_live.get("seguro_pct_input", float(cab.get("seguro_pct") or 0.003) * 100),
                 format="%.2f", step=0.05, key=f"segpct_{cot_id}", help="Ej: escribí 0.3 para 0,3%",
             )
             cf_pct = cf_pct_input / 100
             seguro_pct = seguro_pct_input / 100
-            tc_operativos = c12.number_input("TC Operativos", value=float(cab.get("tc_operativos") or 0), step=1.0, key=f"tcoper_{cot_id}")
+            tc_operativos = c12.number_input(
+                "TC Operativos", value=_cab_live.get("tc_operativos", float(cab.get("tc_operativos") or 0)),
+                step=1.0, key=f"tcoper_{cot_id}",
+            )
+            # Ver la nota grande junto a "_cab_live = ..." más arriba.
+            _cab_live.update(
+                tc_tributos=tc_tributos, cf_pct_input=cf_pct_input,
+                seguro_pct_input=seguro_pct_input, tc_operativos=tc_operativos,
+            )
 
             st.form_submit_button("💾 Guardar datos generales")
 
@@ -2906,6 +3098,7 @@ def _render_cotizador_editor():
     # usuario elija una pestaña, igual que en el Excel.
     _sync_desde_widgets(st.session_state.cot_productos, PROD_FIELD_PREFIX)
     _sync_desde_widgets(st.session_state.cot_gastos, GASTO_FIELD_PREFIX)
+    _prefetch_precios_venta(st.session_state.cot_productos, tc_venta)
 
     cab_calc = {
         "costo_financiero_pct": cf_pct, "seguro_pct": seguro_pct,
@@ -3016,6 +3209,7 @@ def _render_cotizador_editor():
             step=5.0, key=pctcert_key, help="Porción del flete certificada por la naviera para declarar en el CIF.",
         )
         pct_certificacion = pct_certificacion_input / 100
+        _cab_live.update(tarifa_flete=tarifa_flete, pct_certificacion_input=pct_certificacion_input)
         # Los campos disabled=True no refrescan su value= en reruns posteriores
         # (Streamlit los sigue leyendo de session_state, aunque el usuario nunca
         # los toque) — se fuerza acá, mismo patrón que el auto-sync del Seguro.
@@ -3060,6 +3254,10 @@ def _render_cotizador_editor():
             "IVA Gastos locales (%)", value=pct_iva_gastoslocales_input, format="%.2f", step=1.0,
             key=pctivagastoslocales_key, help="% de IVA incluido en Gastos locales — crédito fiscal recuperable.",
         )
+        _cab_live.update(
+            gastos_origen=gastos_origen, gastos_locales_hdr=gastos_locales_hdr,
+            pct_iva_gastoslocales_input=pct_iva_gastoslocales_input,
+        )
 
         # --- Columna 3: Seguro ---
         seguro_modo_ui = tf_seguro.selectbox(
@@ -3080,6 +3278,10 @@ def _render_cotizador_editor():
         pct_iva_seguro_input = tf_seguro.number_input(
             "IVA Seguro (%)", value=pct_iva_seguro_input, format="%.2f", step=1.0,
             key=pctivaseguro_key, help="% de IVA incluido en el Seguro — crédito fiscal recuperable.",
+        )
+        _cab_live.update(
+            seguro_modo_ui=seguro_modo_ui, seguro_manual_usd=seguro_manual_usd,
+            pct_iva_seguro_input=pct_iva_seguro_input,
         )
 
     # ============================================================
@@ -3168,7 +3370,8 @@ def _render_cotizador_editor():
             help="Tasa a la que se estima cobrar la venta — informativo, no afecta el costo (Tarifas flete y "
                  "seguro, Costos operativos y Memoria de cálculo). En 0, PV Final y Ganancia (ARS) por producto dan $0.",
         )
-        _render_simulacion_venta(resultado)
+        _cab_live["tc_venta"] = tc_venta
+        _render_simulacion_venta(resultado, tc_venta)
 
     def _guardar_cotizacion():
         db.save_cotizacion(
