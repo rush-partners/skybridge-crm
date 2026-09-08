@@ -269,9 +269,40 @@ __SB_VARS__
             background: var(--sb-zone) !important;
         }
         [data-testid="stExpander"] summary svg { color: var(--sb-orange) !important; }
-        .stTabs [data-baseweb="tab-list"] { border-bottom-color: var(--sb-border) !important; }
-        .stTabs [data-baseweb="tab"] p { color: var(--sb-text-secondary) !important; }
-        .stTabs [aria-selected="true"] p { color: var(--sb-orange-dark) !important; }
+
+        /* Navegación por pestañas del Cotizador (st.tabs): mismo lenguaje
+        visual que los expanders de arriba (tarjeta con superficie propia,
+        borde, sombra, glow naranja) en vez del look nativo de Streamlit
+        (texto plano + una línea de subrayado) — así cada pestaña se lee
+        como una tarjeta clickeable, calcado del mockup aprobado. Esta
+        versión de Streamlit ya no usa [data-baseweb="tab"] (eso quedó
+        muerto de una versión anterior) — el selector correcto es
+        [data-testid="stTab"] con role="tab" / aria-selected. */
+        [data-testid="stTabs"] [role="tablist"] {
+            display: flex; gap: 8px; flex-wrap: wrap; border-bottom: none !important;
+            margin-bottom: 16px;
+        }
+        [data-testid="stTab"] {
+            flex: 1; min-width: 150px; justify-content: center;
+            background: var(--sb-surface) !important; border: 1px solid var(--sb-border) !important;
+            border-radius: 10px !important; padding: 12px 10px !important;
+            box-shadow: var(--sb-shadow-sm); transition: box-shadow 0.15s ease, border-color 0.15s ease;
+        }
+        [data-testid="stTab"]:hover {
+            box-shadow: var(--sb-shadow-lg); border-color: var(--sb-orange) !important;
+        }
+        [data-testid="stTab"] p {
+            color: var(--sb-text-secondary) !important; font-weight: 700 !important;
+            font-size: 13px !important; white-space: normal !important; text-align: center;
+        }
+        [data-testid="stTab"][aria-selected="true"] {
+            border-color: var(--sb-orange) !important;
+            box-shadow: 0 2px 8px rgba(232, 101, 42, 0.18);
+        }
+        [data-testid="stTab"][aria-selected="true"] p { color: var(--sb-orange-dark) !important; }
+        /* Barrita/indicador de selección nativo de react-aria — ya no hace
+        falta, el borde+sombra de arriba cumple ese rol. */
+        [data-testid="stTab"] .react-aria-SelectionIndicator { display: none !important; }
 
         /* Chips de st.pills (filtro de etapa del CRM: "Nuevos", "Contactados",
         etc.) — mismo problema de fondo que el summary de arriba: Streamlit les
@@ -2441,18 +2472,23 @@ def _render_productos():
     rompe ninguna cotización ya guardada."""
     productos = st.session_state.cot_productos
 
+    # Guarda defensiva nomás: la autoinstanciación del primer producto (para
+    # que el espacio de carga ya aparezca sin clickear nada) vive más
+    # arriba, antes de calcular "resultado" — ver el comentario junto a
+    # st.tabs() en _render_cotizador_editor(). A esta altura `productos`
+    # ya debería venir con al menos 1 fila siempre.
     if not productos:
-        st.info("Todavía no cargaste productos. Usá '➕ Agregar producto' cuando lo necesites.")
-    else:
-        resumen = [{
-            "#": i + 1,
-            "Descripción": ("⚠️ " if (_f_local(p.get("fob_unit")) == 0 or _f_local(p.get("cantidad")) == 0) else "")
-                + (p.get("descripcion") or "(sin nombre)"),
-            "FOB Unit.": money(_f_local(p.get("fob_unit"))),
-            "Cantidad": f'{_f_local(p.get("cantidad")):,.2f}',
-            "FOB Total": money(_f_local(p.get("fob_unit")) * _f_local(p.get("cantidad"))),
-        } for i, p in enumerate(productos)]
-        _tabla_html(resumen, alinear_derecha=["#", "FOB Unit.", "Cantidad", "FOB Total"])
+        productos.append(_nueva_fila_producto())
+
+    resumen = [{
+        "#": i + 1,
+        "Descripción": ("⚠️ " if (_f_local(p.get("fob_unit")) == 0 or _f_local(p.get("cantidad")) == 0) else "")
+            + (p.get("descripcion") or "(sin nombre)"),
+        "FOB Unit.": money(_f_local(p.get("fob_unit"))),
+        "Cantidad": f'{_f_local(p.get("cantidad")):,.2f}',
+        "FOB Total": money(_f_local(p.get("fob_unit")) * _f_local(p.get("cantidad"))),
+    } for i, p in enumerate(productos)]
+    _tabla_html(resumen, alinear_derecha=["#", "FOB Unit.", "Cantidad", "FOB Total"])
 
     borrar_idx = None
     for i, p in enumerate(productos):
@@ -2724,6 +2760,14 @@ def _render_cotizador_editor():
     # pestañas y trataría cada cambio de estado como un widget nuevo,
     # perdiendo la pestaña que el usuario tenía abierta (mismo motivo por
     # el que los acordeones de antes necesitaban key fija).
+    #
+    # Autoinstanciar acá (antes de calcular "resultado" y los labels) y no
+    # más abajo, dentro de _render_productos(): así el espacio del primer
+    # producto ya sale completo desde el primer render — resultado, el
+    # label de la pestaña "Productos" y el resumen de costeo lo ven ya
+    # cargado, en vez de aparecer recién en el siguiente rerun.
+    if not st.session_state.cot_productos:
+        st.session_state.cot_productos.append(_nueva_fila_producto())
     _productos_tiene_ceros = _mercaderia_tiene_ceros(st.session_state.cot_productos)
     _productos_listos = bool(st.session_state.cot_productos) and not _productos_tiene_ceros
     _gastos_tiene_ceros = _gastos_visibles_tiene_ceros(st.session_state.cot_gastos)
@@ -2863,6 +2907,21 @@ def _render_cotizador_editor():
         r1.metric("Costo FOB", money(resultado["fob_total_sum"]))
         r2.metric("Costo Final", money(resultado["total_c_iva_usd"]))
         r3.metric("Incidencia s/FOB", pct(resultado["incidencia_fob"]))
+
+        # Pedido explícito: "quiero que se vea también el costo por
+        # producto final c/iva tanto en ars como en usd" — costo UNITARIO
+        # c/IVA (USD y ARS) × cantidad de cada producto = costo final de esa
+        # línea. Multiplicación de exhibición nomás: costo_civa_unit(_ars) y
+        # cantidad ya vienen calculados por calculo.calcular(), no se toca
+        # ningún cálculo, solo se arma la tabla acá.
+        if resultado["productos"]:
+            st.markdown("**Costo final c/IVA por producto**")
+            filas_costo_prod = [{
+                "Producto": p.get("descripcion") or "(sin nombre)",
+                "Costo Final c/IVA (USD)": money(p["costo_civa_unit"] * p["cantidad"]),
+                "Costo Final c/IVA (ARS)": money(p["costo_civa_unit_ars"] * p["cantidad"], "ARS"),
+            } for p in resultado["productos"]]
+            _tabla_html(filas_costo_prod, alinear_derecha=["Costo Final c/IVA (USD)", "Costo Final c/IVA (ARS)"])
 
     # ============================================================
     # Productos (mercadería + derechos/tasa/antidumping + IVA/IVA Adic./
