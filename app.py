@@ -49,12 +49,33 @@ def _inyectar_estilos():
             "navy": "#E2E8F0", "orange": "#E8652A", "orange-dark": "#F2854D",
             "text-secondary": "#94A3B8", "border": "#334155",
             "surface": "#1E293B", "zone": "#16202E", "bg": "#0B1220",
+            # Rojo de acción destructiva — antes hardcodeado 3 veces (#FEE2E2/
+            # #DC2626, fijo en los 2 modos) directo en los selectores de los
+            # botones "Eliminar". Un rosa pastel casi blanco sobre superficies
+            # oscuras (--sb-surface #1E293B) desentonaba fuerte con el resto
+            # de la paleta en vez de leerse como advertencia — acá va más
+            # oscuro/saturado y el texto más claro, mismo criterio que el
+            # resto de los tokens (invertir peso, no repetir el valor claro).
+            "danger": "#F87171", "danger-bg": "#3F1D1D",
+            # Sombra de elevación de las cards — iba hardcodeada en rgba(15,
+            # 23, 42, ...) (un navy casi negro) en los 4 lugares que la usan,
+            # así que en modo oscuro quedaba prácticamente invisible contra
+            # un fondo ya oscuro. Acá con negro puro y más opacidad, que sí
+            # se distingue contra --sb-surface/--sb-zone. -sm es la versión
+            # liviana que usa el botón "Volver a...".
+            "shadow": "0 1px 3px rgba(0, 0, 0, 0.45), 0 1px 2px rgba(0, 0, 0, 0.3)",
+            "shadow-sm": "0 1px 4px rgba(0, 0, 0, 0.4)",
+            "shadow-lg": "0 4px 24px rgba(0, 0, 0, 0.5), 0 1px 3px rgba(0, 0, 0, 0.35)",
         }
     else:
         tokens = {
             "navy": "#0F172A", "orange": "#E8652A", "orange-dark": "#C04E18",
             "text-secondary": "#64748B", "border": "#E2E8F0",
             "surface": "#FFFFFF", "zone": "#F1F5F9", "bg": "#F8FAFC",
+            "danger": "#DC2626", "danger-bg": "#FEE2E2",
+            "shadow": "0 1px 3px rgba(15, 23, 42, 0.08), 0 1px 2px rgba(15, 23, 42, 0.04)",
+            "shadow-sm": "0 1px 4px rgba(0, 0, 0, 0.08)",
+            "shadow-lg": "0 4px 24px rgba(15, 23, 42, 0.10), 0 1px 3px rgba(15, 23, 42, 0.06)",
         }
     variables_css = "\n".join(f"    --sb-{nombre}: {valor};" for nombre, valor in tokens.items())
 
@@ -102,6 +123,30 @@ __SB_VARS__
             background: var(--sb-zone) !important;
             border-right: 1px solid var(--sb-border);
         }
+        /* Sidebar como columna real (logo/nav arriba, cuenta siempre al pie,
+        pegada al borde inferior) en vez de que la tarjeta de cuenta quede
+        flotando a mitad de página con un espacio en blanco enorme debajo,
+        como pasaba antes — altura completa + flex-column acá, y la tarjeta
+        de cuenta (más abajo, .sb-account-card) se empuja sola al fondo con
+        margin-top: auto. Cadena de height:100% (en vez de un
+        min-height:calc(100vh - Xrem) adivinado) porque stSidebarUserContent
+        trae su propio padding-bottom nativo (~6rem): con un cálculo fijo el
+        bloque se pasaba de largo y la tarjeta quedaba cortada, fuera del
+        área visible del sidebar. Con 100% en toda la cadena, el porcentaje
+        se resuelve solo contra la altura real del padre en cada nivel, así
+        que no importa cuánto padding agregue Streamlit. Selector con el
+        hijo directo (">") para tocar solo el bloque vertical de más afuera
+        del sidebar, no los internos (de columnas, containers, etc.) que
+        también son stVerticalBlock. */
+        [data-testid="stSidebarUserContent"] {
+            height: 100%;
+        }
+        [data-testid="stSidebarUserContent"] > div {
+            height: 100%;
+        }
+        [data-testid="stSidebarUserContent"] > div > [data-testid="stVerticalBlock"] {
+            display: flex; flex-direction: column; height: 100%;
+        }
         [data-testid="stAppViewContainer"], [data-testid="stMain"],
         [data-testid="stMarkdownContainer"] p, [data-testid="stMarkdownContainer"] li,
         [data-testid="stMarkdownContainer"] span, [data-testid="stCaptionContainer"],
@@ -132,6 +177,16 @@ __SB_VARS__
             color: var(--sb-text-secondary) !important; opacity: 1 !important;
         }
         [data-testid="stSelectbox"] [role="group"] {
+            background: var(--sb-surface) !important; border-color: var(--sb-border) !important;
+        }
+        /* El <input> de un number_input ya toma la superficie del tema (regla
+        de arriba), pero el DIV que lo envuelve junto a los botones +/-
+        (stNumberInputContainer) pinta su PROPIO fondo/borde gris clarísimo
+        fijo de Streamlit, no cubierto por ese selector — se notaba sobre
+        todo en los campos disabled (ej. "Tarifa flete certificado", "Seguro
+        (USD)" calculado): quedaban con un marco blanco roto alrededor de un
+        input ya oscuro por dentro, y el bloque +/- prácticamente en blanco. */
+        [data-testid="stNumberInputContainer"] {
             background: var(--sb-surface) !important; border-color: var(--sb-border) !important;
         }
         /* Fecha (react-aria-DateField): tampoco es un <input> — son 3
@@ -170,10 +225,47 @@ __SB_VARS__
         [data-testid="stExpander"] {
             background: var(--sb-surface) !important; border-color: var(--sb-border) !important;
         }
-        [data-testid="stExpander"] summary { color: var(--sb-navy) !important; }
+        /* El <summary> nunca tenía fondo propio (solo color de texto) — normalmente
+        se ve bien porque hereda el fondo oscuro del <details> padre de arriba, pero
+        Streamlit le pinta su PROPIO fondo casi blanco (el de su theme nativo, que
+        sigue en claro — ver nota más abajo sobre st.dataframe con el mismo origen)
+        apenas ese <summary> se vuelve a renderizar con texto distinto — típicamente
+        cuando el título cambia solo (aparece/desaparece "⚠️ hay ítems sin cargar" al
+        cargar un producto/gasto con la sección ya abierta). Ahí quedaba con fondo
+        blanco y letra clara encima, prácticamente invisible. Con fondo explícito acá
+        (y en :hover/:focus/:active, que Streamlit también pinta aparte) queda fijo
+        en la superficie del tema sin importar cuántas veces se vuelva a renderizar. */
+        [data-testid="stExpander"] summary {
+            color: var(--sb-navy) !important; background: var(--sb-surface) !important;
+        }
+        [data-testid="stExpander"] summary:hover, [data-testid="stExpander"] summary:focus,
+        [data-testid="stExpander"] summary:focus-visible, [data-testid="stExpander"] summary:active {
+            background: var(--sb-zone) !important;
+        }
         .stTabs [data-baseweb="tab-list"] { border-bottom-color: var(--sb-border) !important; }
         .stTabs [data-baseweb="tab"] p { color: var(--sb-text-secondary) !important; }
         .stTabs [aria-selected="true"] p { color: var(--sb-orange-dark) !important; }
+
+        /* Chips de st.pills (filtro de etapa del CRM: "Nuevos", "Contactados",
+        etc.) — mismo problema de fondo que el summary de arriba: Streamlit les
+        pinta su propio fondo casi blanco fijo (theme nativo, no el toggle de la
+        app), y como el texto de adentro SÍ sigue el toggle (queda claro en modo
+        oscuro), terminaba en letra clara sobre fondo claro — prácticamente
+        invisible, exactamente lo mismo que pasaba con los expanders. */
+        [data-testid="stButtonGroup"] button[data-variant="pills"] {
+            background: var(--sb-surface) !important; border: 1px solid var(--sb-border) !important;
+        }
+        [data-testid="stButtonGroup"] button[data-variant="pills"] p {
+            color: var(--sb-navy) !important;
+        }
+        /* Chip seleccionado (la etapa activa): fondo naranja de marca en vez del
+        rojo por defecto de Streamlit, con texto blanco — visible en los 2 modos. */
+        [data-testid="stButtonGroup"] button[data-variant="pills"][aria-checked="true"] {
+            background: var(--sb-orange) !important; border-color: var(--sb-orange) !important;
+        }
+        [data-testid="stButtonGroup"] button[data-variant="pills"][aria-checked="true"] p {
+            color: #FFFFFF !important;
+        }
 
         /* Cargador de archivos: dropzone con la misma superficie. */
         [data-testid="stFileUploaderDropzone"] {
@@ -252,7 +344,32 @@ __SB_VARS__
         lee, así que este toggle no lo puede re-pintar. Sigue viéndose con
         la paleta clara en modo oscuro; para eso sí queda 100% acorde hace
         falta cambiar el theme nativo desde ☰ > Settings > Choose app
-        theme (usa la paleta de [theme.dark] en config.toml). */
+        theme (usa la paleta de [theme.dark] en config.toml). Por esto las
+        4 tablas de resumen del Cotizador (mercadería, gastos, base
+        imponible, costeo unitario) se armaron directo en HTML propio con
+        _tabla_html() en vez de st.dataframe — ver estilos abajo. El resto
+        de los st.dataframe de la app (fuera del Cotizador) sigue con esta
+        limitación por ahora. */
+        .sb-table-wrap {
+            overflow-x: auto; border: 1px solid var(--sb-border); border-radius: 8px;
+            margin: 4px 0 10px 0;
+        }
+        .sb-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+        .sb-table th {
+            background: var(--sb-zone); color: var(--sb-text-secondary);
+            font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em;
+            padding: 8px 12px; border-bottom: 1px solid var(--sb-border); white-space: nowrap;
+        }
+        .sb-table td {
+            padding: 7px 12px; border-bottom: 1px solid var(--sb-border); color: var(--sb-navy);
+        }
+        .sb-table tbody tr:last-child td { border-bottom: none; }
+        .sb-table tbody tr:hover td { background: var(--sb-zone); }
+        /* Fila con advertencia (mismo criterio "⚠️ " que ya usan los
+        títulos de expander de mercadería/gastos) — acento naranja a la
+        izquierda en vez de teñir toda la fila, para no competir con el
+        texto de alerta que ya está en la celda. */
+        .sb-table tr.sb-table-warn td:first-child { border-left: 3px solid var(--sb-orange); }
 
         /* Wordmark de marca en el sidebar (calco de "SKY" + "BRIDGE" del sitio) */
         .sb-logo {
@@ -262,20 +379,54 @@ __SB_VARS__
         .sb-logo span { color: var(--sb-orange); }
         .sb-tagline {
             font-size: 11px; font-weight: 500; letter-spacing: 0.08em;
-            text-transform: uppercase; color: var(--sb-text-secondary); margin-bottom: 1.25rem;
+            text-transform: uppercase; color: var(--sb-text-secondary); margin-bottom: 0.5rem;
         }
 
-        /* Usuario activo al pie del sidebar (fila compacta junto al botón
-        de cerrar sesión, ver más abajo el bloque que arma esa fila). */
-        .sb-sidebar-user {
-            font-size: 13px; font-weight: 600; color: var(--sb-navy);
+        /* Tarjeta de cuenta al pie del sidebar: avatar + nombre + 2 acciones
+        (tema, cerrar sesión) en una sola fila prolija, con superficie y
+        borde propios (mismo lenguaje que el resto de las cards de la app)
+        en vez de las 2 piezas sueltas de antes (toggle nativo arriba del
+        todo sin ningún estilo + nombre/logout al pie sin agrupar). Empujada
+        al fondo real del sidebar por el flex-column de arriba.
+
+        OJO: margin-top:auto tiene que ir en el stLayoutWrapper que envuelve
+        directo a la tarjeta (ÉSE es el hijo flex real de stVerticalBlock,
+        no la tarjeta en sí — Streamlit mete un wrapper intermedio). Como la
+        tarjeta de cuenta siempre es el último elemento agregado al sidebar,
+        :last-child la identifica sin depender de :has(). */
+        [data-testid="stSidebarUserContent"] > div > [data-testid="stVerticalBlock"]
+            > [data-testid="stLayoutWrapper"]:last-child {
+            margin-top: auto !important;
+        }
+        [class*="st-key-sidebar_account_card"] {
+            padding-top: 10px !important;
+        }
+        [class*="st-key-sidebar_account_card"] > div {
+            background: var(--sb-surface) !important; border: 1px solid var(--sb-border) !important;
+            border-radius: 10px !important; padding: 10px 10px !important;
+        }
+        .sb-avatar {
+            width: 30px; height: 30px; border-radius: 50%; background: var(--sb-orange);
+            color: #FFFFFF; font-weight: 800; font-size: 12.5px;
+            display: flex; align-items: center; justify-content: center;
+        }
+        .sb-account-name {
+            font-size: 12.5px; font-weight: 700; color: var(--sb-navy);
             overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
         }
-        /* El botón de logout es icon-only (sin label) — le bajamos el padding
-        horizontal para que no quede un rectángulo ancho vacío al lado del
-        ícono, y estrechamos su columna arriba en Python ([2.4, 1]). */
-        [class*="st-key-sidebar_logout"] button {
+        .sb-account-role {
+            font-size: 10.5px; color: var(--sb-text-secondary); margin-top: -1px;
+        }
+        /* Los 2 botones de acción de la tarjeta (tema / cerrar sesión) son
+        icon-only (sin label) — mismo tratamiento chico y sin padding lateral
+        de sobra para los dos, en vez de que uno quedara con look de botón
+        normal y ancho variable como pasaba antes. */
+        [class*="st-key-sidebar_theme_toggle"] button, [class*="st-key-sidebar_logout"] button {
             padding-left: 0 !important; padding-right: 0 !important;
+            background: transparent !important; border: none !important;
+        }
+        [class*="st-key-sidebar_theme_toggle"] button:hover, [class*="st-key-sidebar_logout"] button:hover {
+            background: var(--sb-zone) !important; border-radius: 6px !important;
         }
 
         /* Títulos de sección: acento naranja con más contraste (orange-dark)
@@ -335,7 +486,7 @@ __SB_VARS__
         }
         .sb-btn-link:hover { border-color: var(--sb-orange); color: var(--sb-orange) !important; }
 
-        /* Fila de carga rápida de contactos (CRM): el botón "＋ Agregar" no
+        /* Fila de carga rápida de contactos (CRM): el botón "➕ Agregar" no
         tiene el renglón de label que sí reservan los text_input de al lado
         (aunque esté colapsado), así que sin este ajuste queda más alto y
         partido en 2 líneas si la columna es angosta — con nowrap se
@@ -390,7 +541,7 @@ __SB_VARS__
         [class*="st-key-fichahdr_"] {
             background: var(--sb-surface); border-radius: 8px; padding: 22px 28px;
             border-left: 4px solid var(--sb-orange);
-            box-shadow: 0 1px 3px rgba(15, 23, 42, 0.08), 0 1px 2px rgba(15, 23, 42, 0.04);
+            box-shadow: var(--sb-shadow);
             margin-bottom: -0.25rem;
         }
         [class*="st-key-fichahdr_"] > div[data-testid="stHorizontalBlock"] {
@@ -435,7 +586,7 @@ __SB_VARS__
             height: 38px !important; min-height: 38px !important;
             padding: 0 16px !important; font-size: 13px !important; font-weight: 600 !important;
             white-space: nowrap !important;
-            box-shadow: 0 1px 4px rgba(0,0,0,0.08);
+            box-shadow: var(--sb-shadow-sm);
             transition: background 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
         }
         [class*="st-key-volver_"] .stButton button:hover {
@@ -456,7 +607,7 @@ __SB_VARS__
         llevan un tratamiento de botón distinto: "cardwrap_" son cards de
         listado con acción de link discreto ("Ver más"); "formrow_" y
         "clientecard_" son filas con botones reales (formulario o
-        "＋ Cotizar"/"Ver ficha →"); "resultgroup_" son grupos de métricas de
+        "➕ Cotizar"/"Ver ficha →"); "resultgroup_" son grupos de métricas de
         solo lectura (Resultado de la operación / Simulación de venta), sin
         botones. "actev_" son eventos de timeline (ficha de contacto CRM),
         de solo lectura como "resultgroup_" pero sin métricas. */
@@ -467,7 +618,7 @@ __SB_VARS__
             border: 1px solid var(--sb-border) !important;
             border-left: 3px solid var(--sb-orange) !important;
             border-radius: 8px !important;
-            box-shadow: 0 1px 3px rgba(15, 23, 42, 0.08), 0 1px 2px rgba(15, 23, 42, 0.04) !important;
+            box-shadow: var(--sb-shadow) !important;
         }
 
         /* Card de cliente: más aire que el padding por defecto de Streamlit
@@ -479,7 +630,7 @@ __SB_VARS__
             padding: 20px 24px 22px 24px !important;
             min-height: 96px;
         }
-        /* Botones de la card de cliente: "＋ Cotizar" es la acción primaria
+        /* Botones de la card de cliente: "➕ Cotizar" es la acción primaria
         (naranja relleno, type="primary" nativo de Streamlit — ya toma el
         primaryColor del theme en claro/oscuro sin CSS propio) y "Ver ficha"
         pasa de gris plano a un outline naranja con hover relleno, para que
@@ -534,9 +685,58 @@ __SB_VARS__
             width: 38px !important; height: 38px !important;
         }
         /* "Eliminar" en rojo al hover, para que se note que es la acción
-        destructiva del grupo — el resto se queda con el gris neutro. */
-        [class*="st-key-coteli_"] button:hover {
-            background: #FEE2E2 !important; border-color: #DC2626 !important; color: #DC2626 !important;
+        destructiva del grupo — el resto se queda con el gris neutro. Antes
+        solo 3 de ~10 botones "Eliminar" de la app tenían este tratamiento
+        (coteli_/crmdel_/crmdescartar_, ver más abajo); el resto (documento
+        de cliente, importación, producto, gasto, cliente, cotización,
+        contacto) quedaba con el gris neutro por defecto de Streamlit, sin
+        ninguna señal de que la acción es irreversible. Une todos los
+        botones "Eliminar" de la app bajo un solo criterio visual. */
+        [class*="st-key-coteli_"] button:hover,
+        [class*="st-key-delcliedoc_"] button:hover,
+        [class*="st-key-impdel_"] button:hover,
+        [class*="st-key-pdel_"] button:hover,
+        [class*="st-key-gdel_"] button:hover,
+        [class*="st-key-btndelcliente_"] button:hover,
+        [class*="st-key-btndelcotizacion_"] button:hover,
+        [class*="st-key-btndelcontacto_"] button:hover {
+            background: var(--sb-danger-bg) !important; border-color: var(--sb-danger) !important; color: var(--sb-danger) !important;
+        }
+        /* Confirmación "Sí, eliminar" de los diálogos de borrado: usaba
+        type="primary", el mismo naranja relleno que "Guardar cambios" — el
+        único click que es en serio irreversible se veía igual que un botón
+        de guardado de rutina. Mismo rojo que el resto de las acciones
+        destructivas de arriba (no el hover: acá va sólido, como corresponde
+        a un botón primary). "Sí, restaurar"/"Sí, aprobar" NO son
+        destructivos y se quedan con el naranja de siempre. */
+        [class*="st-key-confirmdeldoc_"] button, [class*="st-key-confirmdelcliedoc_"] button,
+        [class*="st-key-confirmimpdel_"] button, [class*="st-key-confirmclidel_"] button,
+        [class*="st-key-confirmardel_"] button, [class*="st-key-crmconfirmardel_"] button {
+            background: var(--sb-danger) !important; border-color: var(--sb-danger) !important;
+        }
+        [class*="st-key-confirmdeldoc_"] button:hover, [class*="st-key-confirmdelcliedoc_"] button:hover,
+        [class*="st-key-confirmimpdel_"] button:hover, [class*="st-key-confirmclidel_"] button:hover,
+        [class*="st-key-confirmardel_"] button:hover, [class*="st-key-crmconfirmardel_"] button:hover {
+            filter: brightness(0.9);
+        }
+
+        /* st.dialog (confirmar eliminar/aprobar/restaurar, y cualquier otro
+        modal de la app): la caja del modal en sí es un <div> SIN testid ni
+        key propios (vive adentro de [data-testid="stDialog"], que es solo
+        el overlay/backdrop) — Streamlit le pone fondo blanco fijo de su
+        theme nativo, mismo origen que el resto de los fondos fijos ya
+        corregidos (summary de expander, chips de pills), pero acá pega más
+        fuerte: es el único momento de la app donde se confirma una acción
+        irreversible, y quedaba con el texto claro de modo oscuro sobre
+        blanco — pálido, casi ilegible, justo en el paso más importante.
+        Selector estructural (":first-child", no una clase autogenerada de
+        Streamlit que puede cambiar de una versión a otra) porque ese div
+        no tiene ningún gancho propio. */
+        [data-testid="stDialog"] > div:first-child {
+            background: var(--sb-surface) !important;
+        }
+        [data-testid="stDialog"] h2 {
+            color: var(--sb-navy) !important;
         }
 
         /* Columna de estado de la fila de cotización: el badge arriba y,
@@ -579,7 +779,7 @@ __SB_VARS__
 
         /* Botón "Nueva cotización": mismo naranja primario, pero más chico
         y con el radio/sombra al hover del resto de los CTA de la app (ej.
-        "＋ Cotizar" en Clientes), en vez del bloque plano por defecto de
+        "➕ Cotizar" en Clientes), en vez del bloque plano por defecto de
         Streamlit. */
         [class*="st-key-nueva_cotizacion_historial"] button {
             height: 38px !important; border-radius: 6px !important;
@@ -636,7 +836,7 @@ __SB_VARS__
         }
 __CRM_ETAPA_CSS__
         /* Botones de la card: "Avanzar etapa" (sólido, primario nativo de
-        Streamlit) + "Ver ficha →" (outline) — mismo par que "＋ Cotizar" /
+        Streamlit) + "Ver ficha →" (outline) — mismo par que "➕ Cotizar" /
         "Ver ficha →" en Clientes. Selector por descendencia (no ">"): al
         llevar help=, el wrapper de tooltip mete el <button> más adentro.
         white-space: nowrap — "Avanzar etapa" partía en 2 líneas dentro de
@@ -678,7 +878,7 @@ __CRM_ETAPA_CSS__
         /* "Eliminar contacto" en rojo al hover, mismo criterio que
         "Eliminar" en el historial del Cotizador (coteli_). */
         [class*="st-key-crmdel_"] button:hover {
-            background: #FEE2E2 !important; border-color: #DC2626 !important; color: #DC2626 !important;
+            background: var(--sb-danger-bg) !important; border-color: var(--sb-danger) !important; color: var(--sb-danger) !important;
         }
         /* "Marcar como Descartado": gris apagado en reposo (no compite en
         peso visual con "Avanzar etapa"/"Ver ficha →" arriba), mismo rojo
@@ -691,7 +891,7 @@ __CRM_ETAPA_CSS__
             height: 34px !important;
         }
         [class*="st-key-crmdescartar_"] button:hover {
-            background: #FEE2E2 !important; border-color: #DC2626 !important; color: #DC2626 !important;
+            background: var(--sb-danger-bg) !important; border-color: var(--sb-danger) !important; color: var(--sb-danger) !important;
         }
 
         /* Íconos compactos de acceso rápido (WhatsApp / mail / ficha de
@@ -785,15 +985,24 @@ __CRM_ETAPA_CSS__
         }
         .sb-login-logo span { color: var(--sb-orange); }
         .sb-login-tagline {
-            font-size: 11.5px; font-weight: 500; letter-spacing: 0.1em;
+            /* Mismo tamaño y tracking que .sb-tagline (el "CRM COMEX" del
+            sidebar, arriba) — es el mismo rol de texto (tagline chica en
+            mayúscula debajo del logo) en 2 pantallas distintas, antes con
+            2 valores ligeramente distintos (11.5px/0.1em acá vs 11px/0.08em
+            en el sidebar) sin ningún motivo para la diferencia. */
+            font-size: 11px; font-weight: 500; letter-spacing: 0.08em;
             text-transform: uppercase; color: var(--sb-text-secondary);
             text-align: center; margin-bottom: 1.25rem;
         }
         [class*="st-key-sb_login_card"] {
             background: var(--sb-surface); border: 1px solid var(--sb-border);
-            border-radius: 10px; padding: 1.5rem 2rem 0.75rem;
-            box-shadow: 0 4px 24px rgba(15, 23, 42, 0.10), 0 1px 3px rgba(15, 23, 42, 0.06);
-            border-top: 4px solid var(--sb-orange);
+            border-radius: 8px; padding: 1.5rem 2rem 0.75rem;
+            box-shadow: var(--sb-shadow-lg);
+            /* border-left (no border-top): mismo acento naranja que el
+            resto de las cards de la app (fichahdr_/cardwrap_/etc, ver
+            arriba) — antes era el único lugar con el acento arriba en vez
+            de a la izquierda, sin ningún motivo para la diferencia. */
+            border-left: 4px solid var(--sb-orange);
         }
         </style>
         """.replace("__SB_VARS__", variables_css).replace("__CRM_ETAPA_CSS__", etapa_css),
@@ -903,6 +1112,40 @@ def _badge(texto, color):
         f'<span style="background:{color}22; color:{color}; padding:2px 9px; '
         f'border-radius:4px; font-size:11px; font-weight:700; text-transform:uppercase; '
         f'letter-spacing:0.03em; white-space:nowrap;">{html.escape(texto)}</span>'
+    )
+
+
+def _tabla_html(filas, alinear_derecha=None):
+    """Tabla de solo lectura en HTML propio (clase .sb-table, ver
+    _inyectar_estilos) en vez de st.dataframe — para las tablas de resumen
+    del Cotizador, que con st.dataframe quedaban con la paleta clara fija
+    en modo oscuro (el canvas de Glide Data Grid no lee las variables CSS
+    de la app). filas: lista de dicts con las MISMAS claves y en el MISMO
+    orden entre sí (= columnas, tomadas de la primera fila). alinear_derecha:
+    nombres de columna a alinear a la derecha (valores numéricos/monetarios)."""
+    if not filas:
+        return
+    alinear_derecha = set(alinear_derecha or [])
+    columnas = list(filas[0].keys())
+    thead = "".join(
+        f'<th style="text-align:{"right" if c in alinear_derecha else "left"}">{html.escape(str(c))}</th>'
+        for c in columnas
+    )
+    filas_html = []
+    for fila in filas:
+        # Mismo criterio "⚠️ " al frente que ya usan los títulos de expander
+        # de mercadería/gastos para marcar ítems sin cargar.
+        es_alerta = any(str(v).startswith("⚠️") for v in fila.values())
+        clase_fila = ' class="sb-table-warn"' if es_alerta else ""
+        celdas = "".join(
+            f'<td style="text-align:{"right" if c in alinear_derecha else "left"}">{html.escape(str(fila[c]))}</td>'
+            for c in columnas
+        )
+        filas_html.append(f"<tr{clase_fila}>{celdas}</tr>")
+    st.markdown(
+        f'<div class="sb-table-wrap"><table class="sb-table">'
+        f'<thead><tr>{thead}</tr></thead><tbody>{"".join(filas_html)}</tbody></table></div>',
+        unsafe_allow_html=True,
     )
 
 
@@ -1193,7 +1436,11 @@ def _render_documentos_cliente(cliente_id):
             c1.write(f"📄 {d['nombre_archivo']}")
             c2.caption(_fmt_fecha_hora(d["subido_en"]))
             c3.caption(_fmt_tamano(d["tamano_bytes"]))
-            with c4.popover("✏️", use_container_width=True):
+            # icon=, no el emoji "✏️" como label — mismo criterio que el resto
+            # de los botones/popovers icon-only de la app (fila de acciones
+            # del historial de cotizaciones, "Eliminar contacto", etc.), en
+            # vez de mezclar 2 sistemas de íconos distintos para lo mismo.
+            with c4.popover("", icon=":material/edit:", use_container_width=True, help="Renombrar"):
                 base_actual, ext_actual = _split_ext(d["nombre_archivo"])
                 nuevo_base = st.text_input(
                     "Nuevo nombre", value=base_actual, key=f"renombrarcliedoc_{d['id']}",
@@ -1270,7 +1517,7 @@ def _render_documentos_categoria(imp_id, categoria):
             es_excel = d["nombre_archivo"].lower().endswith((".xlsx", ".xls"))
             c1, c2, c3, c4, c5 = st.columns([2.7, 0.5, 1.1, 1.3, 0.5])
             c1.write(f"📄 {d['nombre_archivo']}")
-            with c2.popover("✏️", use_container_width=True):
+            with c2.popover("", icon=":material/edit:", use_container_width=True, help="Renombrar"):
                 base_actual, ext_actual = _split_ext(d["nombre_archivo"])
                 nuevo_base = st.text_input(
                     "Nuevo nombre", value=base_actual, key=f"renombrardoc_{d['id']}",
@@ -1695,7 +1942,7 @@ def _render_ficha_cliente(cli):
                 db.update_cliente(cli["id"], nombre, cuit, email, telefono, direccion, rubro, productos_interes, notas)
                 st.success("Actualizado.")
                 st.rerun()
-            if b2.form_submit_button("🗑️ Eliminar cliente"):
+            if b2.form_submit_button("🗑️ Eliminar cliente", key=f"btndelcliente_{cli['id']}"):
                 _dialog_eliminar_cliente(cli["id"], cli["nombre"])
 
     with tab_documentos:
@@ -1759,7 +2006,7 @@ def _render_fila_cliente(cli, cot_por_cliente, en_proceso_por_cliente, completad
         # queda en la columna central (3) y "Ver ficha →" en la última (4),
         # pegado al borde derecho de la card.
         c3.button(
-            "＋ Cotizar", key=f"cotizarcliente_{cli['id']}", use_container_width=True,
+            "➕ Cotizar", key=f"cotizarcliente_{cli['id']}", use_container_width=True,
             on_click=_cotizar_cliente, args=(cli["id"],), type="primary",
         )
         if c4.button("Ver ficha →", key=f"vercliente_{cli['id']}", use_container_width=True, type="secondary"):
@@ -1926,8 +2173,11 @@ def vista_clientes():
 
     # ---- Encabezado: título + botón "Nuevo cliente" (alterna el formulario) ----
     c_titulo, c_nuevo = st.columns([4, 1], vertical_alignment="center")
-    c_titulo.title("Clientes")
-    if c_nuevo.button("＋ Nuevo cliente", use_container_width=True, type="primary", key="clientes_toggle_nuevo"):
+    # st.header (no st.title, que quedaba más grande y sin ícono que el
+    # resto) — mismo patrón que Panel de Control/Cotizador/CRM, y el mismo
+    # ícono que ya usa este ítem en el nav del sidebar ("📋 Clientes").
+    c_titulo.header("📋 Clientes")
+    if c_nuevo.button("➕ Nuevo cliente", use_container_width=True, type="primary", key="clientes_toggle_nuevo"):
         st.session_state.clientes_mostrar_form_nuevo = not st.session_state.get("clientes_mostrar_form_nuevo", False)
 
     if st.session_state.get("clientes_mostrar_form_nuevo"):
@@ -2156,15 +2406,15 @@ def _render_mercaderia():
     if not productos:
         st.info("Todavía no cargaste productos. Usá '➕ Agregar producto' cuando lo necesites.")
     else:
-        resumen = pd.DataFrame([{
+        resumen = [{
             "#": i + 1,
             "Descripción": ("⚠️ " if (_f_local(p.get("fob_unit")) == 0 or _f_local(p.get("cantidad")) == 0) else "")
                 + (p.get("descripcion") or "(sin nombre)"),
             "FOB Unit.": money(_f_local(p.get("fob_unit"))),
-            "Cantidad": _f_local(p.get("cantidad")),
+            "Cantidad": f'{_f_local(p.get("cantidad")):,.2f}',
             "FOB Total": money(_f_local(p.get("fob_unit")) * _f_local(p.get("cantidad"))),
-        } for i, p in enumerate(productos)])
-        st.dataframe(resumen, hide_index=True, use_container_width=True)
+        } for i, p in enumerate(productos)]
+        _tabla_html(resumen, alinear_derecha=["#", "FOB Unit.", "Cantidad", "FOB Total"])
 
     borrar_idx = None
     for i, p in enumerate(productos):
@@ -2232,7 +2482,7 @@ def _render_base_imponible(resultado):
         "Producto": p.get("descripcion") or "-", "CIF Producto": money(p["cif_producto"]),
         "Derechos+Tasas+Antidump.": money(p["subtotal_der_tasas"]), "Base IVA": money(p["base_iva_prod"]),
     } for p in productos]
-    st.dataframe(pd.DataFrame(rows), hide_index=True, use_container_width=True)
+    _tabla_html(rows, alinear_derecha=["CIF Producto", "Derechos+Tasas+Antidump.", "Base IVA"])
     st.metric("Base IVA Total", money(resultado["base_iva_total"]))
 
 
@@ -2271,13 +2521,13 @@ def _render_gastos():
     visibles = [(i, g) for i, g in enumerate(gastos) if g.get("concepto") not in GASTOS_EN_TARIFAS_FLETE]
 
     if visibles:
-        resumen = pd.DataFrame([{
+        resumen = [{
             "#": n + 1,
             "Concepto": ("⚠️ " if _f_local(g.get("monto")) == 0 else "") + (g.get("concepto") or "(sin nombre)"),
             "Monto": money(_f_local(g.get("monto")), g.get("moneda") or "USD"),
-            "Prorrateo": g.get("prorrateo"),
-        } for n, (i, g) in enumerate(visibles)])
-        st.dataframe(resumen, hide_index=True, use_container_width=True)
+            "Prorrateo": g.get("prorrateo") or "-",
+        } for n, (i, g) in enumerate(visibles)]
+        _tabla_html(resumen, alinear_derecha=["#", "Monto"])
 
     borrar_idx = None
     for n, (i, g) in enumerate(visibles):
@@ -2524,21 +2774,24 @@ def _render_cotizador_editor():
 
     # ============================================================
     # Resumen fijo arriba de todo: antes había que abrir las 10 secciones
-    # una por una hasta llegar a "9️⃣ Resultado" y "🔟 Simulación de venta"
-    # (al final del todo) para ver el número que en realidad importa. Estos
-    # 4 valores son EXACTAMENTE los mismos que van a aparecer más abajo en
-    # esas dos secciones — mismo diccionario "resultado", ningún cálculo
-    # nuevo — solo se muestran también acá arriba, sin obligar a abrir nada,
-    # a modo de vistazo rápido. Las secciones siguen abajo, colapsadas, para
-    # quien quiera revisar o editar el detalle de cada una.
+    # una por una hasta llegar a "9️⃣ Resultado" (al final) para ver el
+    # número que en realidad importa acá. Estos 3 valores son EXACTAMENTE
+    # los mismos que van a aparecer más abajo en esa sección — mismo
+    # diccionario "resultado", ningún cálculo nuevo — solo se muestran
+    # también acá arriba, sin obligar a abrir nada.
+    #
+    # A propósito NO incluye venta/ganancia/rentabilidad: este resumen es
+    # el costeo de la importación (lo que se paga), no el negocio de venta
+    # — eso es responsabilidad del vendedor y vive solo en "🔟 Simulación
+    # de venta". Los 3 ítems (Precio FOB, Total Final, Incidencia s/FOB)
+    # son un pedido explícito del dueño de la app, en USD.
     # ============================================================
     with st.container(border=True, key=f"resultgroup_resumentop_{cot_id}"):
-        st.markdown('<div class="sb-card-title">📊 Resumen de la cotización</div>', unsafe_allow_html=True)
-        r1, r2, r3, r4 = st.columns(4)
-        r1.metric("TOTAL desembolsado (c/IVA)", money(resultado["total_c_iva_usd"]))
-        r2.metric("Venta total estimada", money(resultado["venta_total_usd"]))
-        r3.metric("Ganancia bruta", money(resultado["ganancia_bruta_usd"]))
-        r4.metric("% Rentabilidad s/inversión", pct(resultado["rentabilidad_pct"]))
+        st.markdown('<div class="sb-card-title">📊 Resumen de costeo</div>', unsafe_allow_html=True)
+        r1, r2, r3 = st.columns(3)
+        r1.metric("Precio FOB", money(resultado["fob_total_sum"]))
+        r2.metric("Total Final", money(resultado["total_c_iva_usd"]))
+        r3.metric("Incidencia s/FOB", pct(resultado["incidencia_fob"]))
 
     # ============================================================
     # 2️⃣ Detalle de mercadería y precios
@@ -2713,7 +2966,10 @@ def _render_cotizador_editor():
                 "Costo s/IVA Unit. (USD)": money(p["costo_sviva_unit"]),
                 "Costo s/IVA Unit. (ARS)": money(p["costo_sviva_unit_ars"], "ARS"),
             } for p in resultado["productos"]]
-            st.dataframe(pd.DataFrame(rows), hide_index=True, use_container_width=True)
+            _tabla_html(rows, alinear_derecha=[
+                "Costo c/IVA Unit. (USD)", "Costo c/IVA Unit. (ARS)",
+                "Costo s/IVA Unit. (USD)", "Costo s/IVA Unit. (ARS)",
+            ])
             check = resultado["check_diferencia"]
             if abs(check) < 0.5:
                 st.success(f"✅ Check de consistencia OK (diferencia: {check:,.4f})")
@@ -2803,7 +3059,7 @@ def _render_cotizador_editor():
         "📑 PDF completo", data=pdf_completo, file_name=f"{nombre_pdf} - Completo.pdf",
         mime="application/pdf", use_container_width=True,
     )
-    if colD.button("🗑️ Eliminar cotización", use_container_width=True):
+    if colD.button("🗑️ Eliminar cotización", use_container_width=True, key=f"btndelcotizacion_{cot_id}"):
         _dialog_eliminar_cotizacion(cot_id, cab["numero"])
 
 
@@ -3540,7 +3796,7 @@ COTIZACION_SUBFILTROS = {
 def _render_carga_rapida_contacto():
     """Alta rápida de un contacto (nombre/CUIT/teléfono + botón) — espacio
     propio y siempre visible arriba del buscador de "👥 Contactos", mismo
-    lugar y misma idea que ya existía antes (colapsado detrás de "＋ Nuevo
+    lugar y misma idea que ya existía antes (colapsado detrás de "➕ Nuevo
     contacto"): para sumar un contacto suelto no hace falta abrir nada."""
     with st.container(border=True, key="formrow_crm_carga_rapida"):
         with st.form("form_carga_rapida", clear_on_submit=True):
@@ -3552,7 +3808,7 @@ def _render_carga_rapida_contacto():
             # corto — se cortaba en "...WhatsAp").
             telefono_rapido = cr3.text_input("Teléfono", label_visibility="collapsed", placeholder="Tel. / WhatsApp")
             email_rapido = cr4.text_input("Email", label_visibility="collapsed", placeholder="Email (opcional)")
-            if cr5.form_submit_button("＋ Agregar", use_container_width=True, type="primary"):
+            if cr5.form_submit_button("➕ Agregar", use_container_width=True, type="primary"):
                 email_norm = crm.normalizar_email(email_rapido)
                 if not nombre_rapido.strip():
                     st.error("El nombre es obligatorio.")
@@ -3571,7 +3827,7 @@ def _render_carga_rapida_contacto():
 
 
 def _render_importar_contactos_masivo():
-    """Importación masiva desde Excel/CSV — colapsada detrás de "＋ Nuevo
+    """Importación masiva desde Excel/CSV — colapsada detrás de "➕ Nuevo
     contacto" (a diferencia de la carga rápida, esta sí vale la pena
     mantenerla oculta por default: mapeo de columnas, vista previa, etc.,
     mucho más pesada que completar 3 campos)."""
@@ -4100,7 +4356,7 @@ def _render_ficha_contacto(c):
                         )
                         st.success("Actualizado.")
                         st.rerun()
-                if b2.form_submit_button("🗑️ Eliminar contacto"):
+                if b2.form_submit_button("🗑️ Eliminar contacto", key=f"btndelcontacto_{c['id']}"):
                     db.delete_contact(c["id"])
                     st.session_state.contacto_seleccionado = None
                     st.warning("Contacto eliminado.")
@@ -4495,11 +4751,6 @@ def main():
         '<div class="sb-tagline">CRM COMEX</div>',
         unsafe_allow_html=True,
     )
-    # El toggle en sí solo guarda el booleano en session_state — el cambio de
-    # paleta lo hace _inyectar_estilos() (ya corrido al importar el módulo,
-    # arriba del todo) leyendo ese mismo valor en el siguiente rerun, que
-    # Streamlit dispara automáticamente al tocar el widget.
-    st.sidebar.toggle("🌙 Modo oscuro", key="tema_oscuro")
 
     # Fijamos el valor por defecto ANTES de instanciar el widget (única forma
     # válida de asignarle un valor inicial): así, cuando un callback de otra
@@ -4510,23 +4761,47 @@ def main():
         "Navegación", PAGINAS, key="pagina_nav", on_change=_resetear_subpaginas,
     )
 
-    # Usuario + cerrar sesión al pie del sidebar, separados del menú por un
-    # divider — antes vivían arriba, entre el toggle de modo oscuro y el
-    # menú de navegación, compitiendo con la marca sin ser parte de la
-    # navegación en sí. Es el mismo lugar que usan la mayoría de las apps
-    # con sidebar (Slack, Notion, etc.): la cuenta activa al pie, separada
-    # del contenido. Fila compacta (nombre + ícono, no un botón de ancho
-    # completo con su propio caption arriba) para que no pese tanto como
-    # un ítem más del menú.
-    st.sidebar.divider()
-    col_user, col_logout = st.sidebar.columns([2.4, 1], vertical_alignment="center")
-    col_user.markdown(
-        f'<div class="sb-sidebar-user">👤 {html.escape(st.session_state.usuario_autenticado["nombre"])}</div>',
-        unsafe_allow_html=True,
-    )
-    if col_logout.button("", icon=":material/logout:", key="sidebar_logout", help="Cerrar sesión", use_container_width=True):
-        st.session_state.usuario_autenticado = None
-        st.rerun()
+    # Tarjeta de cuenta, siempre pegada al pie real del sidebar (ver el
+    # flex-column de más arriba en _inyectar_estilos) — antes eran 2 piezas
+    # sueltas sin relación visual entre sí: el toggle de modo oscuro (sin
+    # ningún estilo propio, con el rojo nativo de Streamlit — nada que ver
+    # con la marca) flotando debajo del logo, y el nombre + botón de cerrar
+    # sesión aparte, al pie, separados por un simple divider. Ahora las 2
+    # acciones de cuenta (tema, cerrar sesión) viven juntas en una sola
+    # tarjeta con avatar — mismo patrón que usan Slack/Notion/etc.: la
+    # identidad activa y sus acciones, agrupadas, al fondo del todo.
+    with st.sidebar.container(key="sidebar_account_card"):
+        col_avatar, col_nombre, col_tema, col_logout = st.columns(
+            [0.62, 1.9, 0.55, 0.55], vertical_alignment="center",
+        )
+        nombre_usuario = st.session_state.usuario_autenticado["nombre"]
+        inicial = (nombre_usuario or "?").strip()[:1].upper() or "?"
+        col_avatar.markdown(f'<div class="sb-avatar">{html.escape(inicial)}</div>', unsafe_allow_html=True)
+        col_nombre.markdown(
+            f'<div class="sb-account-name">{html.escape(nombre_usuario)}</div>',
+            unsafe_allow_html=True,
+        )
+        # El toggle en sí solo guarda el booleano en session_state — el cambio
+        # de paleta lo hace _inyectar_estilos() (ya corrido al importar el
+        # módulo, arriba del todo) leyendo ese mismo valor en el siguiente
+        # rerun. Botón icon-only en vez del toggle nativo: mismo lenguaje
+        # visual que "Cerrar sesión" al lado (los 2 son acciones de cuenta,
+        # no un campo de formulario), y el ícono ya anticipa a qué modo se
+        # pasa al tocarlo (☀️ si está en oscuro, 🌙 si está en claro).
+        tema_activo = st.session_state.get("tema_oscuro", False)
+        icono_tema = ":material/light_mode:" if tema_activo else ":material/dark_mode:"
+        if col_tema.button(
+            "", icon=icono_tema, key="sidebar_theme_toggle",
+            help="Modo claro" if tema_activo else "Modo oscuro", use_container_width=True,
+        ):
+            st.session_state.tema_oscuro = not tema_activo
+            st.rerun()
+        if col_logout.button(
+            "", icon=":material/logout:", key="sidebar_logout",
+            help="Cerrar sesión", use_container_width=True,
+        ):
+            st.session_state.usuario_autenticado = None
+            st.rerun()
 
     _mostrar_flash()
 
