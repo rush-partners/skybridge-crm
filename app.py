@@ -2955,14 +2955,22 @@ def _render_cotizador_editor():
     # Tarifas flete y seguro (antes 3️⃣)
     # ============================================================
     with tab_tarifas:
-        tf1, tf2, tf3 = st.columns(3)
-        tarifa_flete = tf1.number_input(
+        # Grilla única de 3 columnas × 3 filas — un tema por columna (Flete,
+        # Gastos, Seguro), cada una con exactamente 3 campos apilados. Antes
+        # era una fila de 3 (Flete) seguida de una fila de 2 (Gastos/Seguro)
+        # con alturas dispares entre sí — dos grillas distintas apiladas, no
+        # una sola. Pedido explícito: "hay 9 items! no es mas facil alinear
+        # 3, 3 y 3?" — un solo st.columns(3) para las 9, prolijo y alineado.
+        tf_flete, tf_gastos, tf_seguro = st.columns(3)
+
+        # --- Columna 1: Flete ---
+        tarifa_flete = tf_flete.number_input(
             "Tarifa flete (USD)", value=tarifa_flete, format="%.2f", step=10.0, key=tarifaflete_key,
             help="Costo total del flete pagado al forwarder/naviera.",
         )
         if tarifa_flete == 0:
-            tf1.caption("⚠️ Sin cargar")
-        pct_certificacion_input = tf2.number_input(
+            tf_flete.caption("⚠️ Sin cargar")
+        pct_certificacion_input = tf_flete.number_input(
             "% Certificación", value=pct_certificacion_input, format="%.2f", min_value=0.0, max_value=100.0,
             step=5.0, key=pctcert_key, help="Porción del flete certificada por la naviera para declarar en el CIF.",
         )
@@ -2972,23 +2980,12 @@ def _render_cotizador_editor():
         # los toque) — se fuerza acá, mismo patrón que el auto-sync del Seguro.
         tarifafletecert_key = f"tarifafletecert_{cot_id}"
         st.session_state[tarifafletecert_key] = tarifa_flete * pct_certificacion
-        tf3.number_input(
+        tf_flete.number_input(
             "Tarifa flete certificado (USD)", value=tarifa_flete * pct_certificacion, format="%.2f",
             disabled=True, key=tarifafletecert_key, help="= Tarifa flete × % Certificación. Se usa en el CIF.",
         )
 
-        # Dos columnas por TEMA, no por orden de carga: "Gastos" (en origen +
-        # locales + su IVA) a la izquierda, "Seguro" (modo + monto manual +
-        # resultado + su IVA) a la derecha — cada columna cuenta una sola
-        # historia completa de punta a punta, incluido su propio % de IVA al
-        # final, así ninguna se queda con un hueco vacío esperando a la otra
-        # (que fue lo que pasó apilando Seguro debajo de Gastos en origen:
-        # esa columna quedaba más alta y la de Gastos locales, con un solo
-        # campo, dejaba un vacío grande al lado — mismo problema, columna
-        # distinta). Antes el % de IVA de cada uno vivía en una fila aparte,
-        # más abajo, sin conexión visual con su propio campo.
-        tf_gastos, tf_seguro = st.columns(2)
-
+        # --- Columna 2: Gastos ---
         if contenedor in ("FOB", "FCA"):
             # No se cobran gastos en origen con estas dos condiciones (el
             # exportador ya los cubre hasta el puerto de origen) — forzado a
@@ -3023,6 +3020,7 @@ def _render_cotizador_editor():
             key=pctivagastoslocales_key, help="% de IVA incluido en Gastos locales — crédito fiscal recuperable.",
         )
 
+        # --- Columna 3: Seguro ---
         seguro_modo_ui = tf_seguro.selectbox(
             "Seguro", list(SEGURO_MODO_UI_A_DB), key=segmodo_key,
             help="Automático: 0,3% s/FOB declarado con piso USD 75. No cobrar / Manual, a elección.",
