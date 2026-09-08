@@ -1084,21 +1084,32 @@ __CRM_ETAPA_CSS__
         Ver detalle): el botón por defecto de Streamlit tiene una altura fija
         pensada para ser un CTA principal, y sobre 2-3 líneas de texto chico
         queda desproporcionado. Acá se lo trata como una acción secundaria
-        liviana — chico, sin ocupar todo el ancho de la card. */
-        [class*="st-key-cardwrap_"] .stButton {
+        liviana — chico, sin ocupar todo el ancho de la card.
+        OJO — selector con nombre exacto (cardwrap_cot_ / cardwrap_imp_), NO
+        el genérico "st-key-cardwrap_": antes agarraba por sustring TODAS las
+        cards que empiezan con "cardwrap_", incluidas las de Configuración
+        (cardwrap_config_backup/migracion/usuarios/restaurar) — sus botones
+        ("Preparar backup", "Ejecutar migración", "Restaurar", etc.) quedaban
+        aplastados a un link de 12px casi invisible por el all:unset de acá
+        abajo, dando la sensación de que "no hacían nada" al tocarlos. */
+        [class*="st-key-cardwrap_cot_"] .stButton,
+        [class*="st-key-cardwrap_imp_"] .stButton {
             display: flex; justify-content: flex-start; margin: 4px 0 0 0;
         }
-        [class*="st-key-cardwrap_"] .stButton button {
+        [class*="st-key-cardwrap_cot_"] .stButton button,
+        [class*="st-key-cardwrap_imp_"] .stButton button {
             all: unset !important; cursor: pointer; box-sizing: border-box;
             padding: 1px 2px; margin: 0; font-size: 12px; line-height: 1.45;
             font-weight: 600; font-family: inherit; letter-spacing: normal;
             text-transform: none; border-radius: 4px; text-align: center;
             color: var(--sb-orange-dark); white-space: nowrap; display: block;
         }
-        [class*="st-key-cardwrap_"] .stButton button p {
+        [class*="st-key-cardwrap_cot_"] .stButton button p,
+        [class*="st-key-cardwrap_imp_"] .stButton button p {
             font-size: 12px; line-height: 1.45; white-space: nowrap; margin: 0;
         }
-        [class*="st-key-cardwrap_"] .stButton button:hover {
+        [class*="st-key-cardwrap_cot_"] .stButton button:hover,
+        [class*="st-key-cardwrap_imp_"] .stButton button:hover {
             text-decoration: underline;
         }
 
@@ -1500,6 +1511,116 @@ def _eliminar_documento(doc_id):
     # en disco — borrar la fila alcanza, no hay ningún archivo aparte que
     # limpiar.
     db.delete_documento(doc_id)
+
+
+# Fase 8 — documentos de cotización (invoice/Packing List que el cliente
+# manda por WhatsApp, sin lugar hoy para cargarlos). Categorías acotadas al
+# caso real que motivó esto — no las 10 de importación, que son de otra
+# etapa del proceso (despacho ya en marcha).
+DOC_CATEGORIAS_COTIZACION = ["Invoice", "Packing List"]
+
+
+def _guardar_archivos_subidos_cotizacion(cot_id, categoria, archivos, cliente_id=None):
+    for f in archivos:
+        db.add_documento_cotizacion(cot_id, categoria, f.name, f.getvalue())
+    # Refinamiento acordado: subir un documento acá tilda el paso 4
+    # ("Documentación recibida") del pipeline operativo como comodidad —
+    # pero NO dispara necesidad_confirmada ni el paso 1 (relevamiento). Son
+    # señales independientes a propósito: el caso real de sourcing (buscar
+    # proveedor ANTES de tener invoice) rompe si se fusionan.
+    if archivos and cliente_id:
+        contacto = db.get_contact_by_cliente_id(cliente_id)
+        if contacto:
+            tipos_ya = {e["tipo"] for e in db.list_activity(contacto["id"])}
+            if "documentacion_recibida" not in tipos_ya:
+                db.add_activity(
+                    contacto["id"], "documentacion_recibida",
+                    "Documentación recibida (subida automática al cargar un archivo en la cotización).",
+                    st.session_state.get("crm_autor", ""),
+                )
+
+
+def _eliminar_documento_cotizacion(doc_id):
+    db.delete_documento_cotizacion(doc_id)
+
+
+@st.dialog("Eliminar documento")
+def _dialog_eliminar_documento_cotizacion(doc_id, nombre_archivo):
+    st.warning(f"¿Confirmás eliminar **{nombre_archivo}**? Esta acción no se puede deshacer.")
+    c1, c2 = st.columns(2)
+    if c1.button("Cancelar", use_container_width=True, key=f"cancelcotdocdel_{doc_id}"):
+        st.rerun()
+    if c2.button("Sí, eliminar", type="primary", use_container_width=True, key=f"confirmcotdocdel_{doc_id}"):
+        try:
+            _eliminar_documento_cotizacion(doc_id)
+        except db.DBError as e:
+            _flash(f"No se pudo eliminar el documento: {e}", icon="❌")
+        st.rerun()
+
+
+def _render_documentos_categoria_cotizacion(cot_id, categoria, cliente_id=None):
+    """Clon de _render_documentos_categoria apuntado a cotización en vez de
+    importación — clonado a propósito (no generalizado) para no arriesgar
+    la función existente, ya probada y en uso real con importaciones."""
+    docs = db.list_documentos_cotizacion(cot_id, categoria)
+    if docs:
+        for d in docs:
+            contenido = d["contenido"] or b""
+            es_pdf = d["nombre_archivo"].lower().endswith(".pdf")
+            es_excel = d["nombre_archivo"].lower().endswith((".xlsx", ".xls"))
+            c1, c2, c3, c4, c5 = st.columns([2.7, 0.5, 1.1, 1.3, 0.5])
+            c1.write(f"📄 {d['nombre_archivo']}")
+            with c2.popover("", icon=":material/edit:", use_container_width=True, help="Renombrar"):
+                base_actual, ext_actual = _split_ext(d["nombre_archivo"])
+                nuevo_base = st.text_input(
+                    "Nuevo nombre", value=base_actual, key=f"renombrarcotdoc_{d['id']}",
+                )
+                if st.button("💾 Guardar", key=f"renombrarcotdocbtn_{d['id']}"):
+                    if nuevo_base.strip():
+                        db.rename_documento_cotizacion(d["id"], nuevo_base.strip() + ext_actual)
+                        st.rerun()
+                    else:
+                        st.error("El nombre no puede quedar vacío.")
+            c3.download_button(
+                "Descargar", data=contenido,
+                file_name=d["nombre_archivo"], key=f"dlcotdoc_{d['id']}", use_container_width=True,
+            )
+            if es_excel and c4.button("🔄 A PDF", key=f"convcotdoc_{d['id']}", use_container_width=True):
+                with st.spinner("Convirtiendo a PDF…"):
+                    pdf_bytes = storage.convertir_a_pdf(contenido, d["nombre_archivo"])
+                if pdf_bytes:
+                    nombre_pdf = f"{d['nombre_archivo'].rsplit('.', 1)[0]} (convertido).pdf"
+                    db.add_documento_cotizacion(cot_id, categoria, nombre_pdf, pdf_bytes)
+                    st.rerun()
+                else:
+                    st.error("No se pudo convertir el archivo a PDF. Verificá que LibreOffice esté instalado en el servidor.")
+            if c5.button("🗑️", key=f"delcotdoc_{d['id']}", use_container_width=True):
+                _dialog_eliminar_documento_cotizacion(d["id"], d["nombre_archivo"])
+            if es_pdf and contenido:
+                with st.expander("👁️ Vista previa", expanded=False):
+                    st.pdf(contenido, key=f"pdfprevcot_{d['id']}")
+    else:
+        st.caption("Sin archivos cargados todavía.")
+
+    contador_key = f"upl_ctr_cot_{cot_id}_{categoria}"
+    contador = st.session_state.get(contador_key, 0)
+    subidos = st.file_uploader(
+        f"Subir {categoria.lower()}", accept_multiple_files=True,
+        key=f"upl_cot_{cot_id}_{categoria}_{contador}",
+    )
+    if subidos:
+        _guardar_archivos_subidos_cotizacion(cot_id, categoria, subidos, cliente_id)
+        st.session_state[contador_key] = contador + 1
+        st.rerun()
+
+
+def _render_documentos_cotizacion(cot_id, cliente_id=None):
+    """Un tab por categoría (Invoice / Packing List) — mismo patrón que
+    _render_documentos_importacion."""
+    tabs = st.tabs(DOC_CATEGORIAS_COTIZACION, key=f"cotdoctabs_{cot_id}")
+    for tab, categoria in zip(tabs, DOC_CATEGORIAS_COTIZACION):
+        with tab:
+            _render_documentos_categoria_cotizacion(cot_id, categoria, cliente_id)
 
 
 def _eliminar_documento_cliente(doc_id):
@@ -2526,14 +2647,13 @@ def _cotizar_cliente(cliente_id):
     # nueva ya vinculada al cliente y abre el Cotizador directo en ella.
     new_id = db.create_cotizacion_borrador(cliente_id=cliente_id)
     # Mismo patrón que _cotizar_contacto en sentido inverso (cliente →
-    # contacto en vez de contacto → cliente): asegura el vínculo de CRM y
-    # sube a "Cotizado" si corresponde — sin esto, cotizar directo desde
-    # Clientes (sin pasar por un contacto de CRM) dejaba el embudo sin
-    # actualizar. _avanzar_etapa_si_corresponde nunca retrocede, así que no
-    # hay riesgo de pisar una etapa más avanzada (ej. Ganado).
-    contacto = _asegurar_contacto_para_cliente(cliente_id)
-    if contacto:
-        _avanzar_etapa_si_corresponde(contacto["id"], "Cotizado", st.session_state.get("crm_autor", ""))
+    # contacto en vez de contacto → cliente): asegura el vínculo de CRM —
+    # sin esto, cotizar directo desde Clientes (sin pasar por un contacto de
+    # CRM) dejaba el cliente sin contacto vinculado. Ya NO avanza la etapa acá
+    # (crear un borrador no es evidencia de nada por sí sola) — el avance a
+    # "Cotizado"/Calificado ahora pasa por _cambiar_estado_cotizacion cuando
+    # esa cotización se manda de verdad (estado 'Enviada').
+    _asegurar_contacto_para_cliente(cliente_id)
     _cargar_estado_cotizacion(new_id)
     st.session_state.pagina_nav = "🧮 Cotizador"
     st.session_state.cotizador_modo = "editor"
@@ -3052,6 +3172,8 @@ def _render_cotizador_editor():
     label_costos_op = "🧾 Costos operativos"
     label_memoria = "🧮 Memoria de cálculo"
     label_simulacion = "📈 Simulación de venta"
+    # Fase 8 — al final a propósito, no reordena ninguna pestaña existente.
+    label_documentos = "📄 Documentos"
 
     _pendientes = []
     if _productos_tiene_ceros:
@@ -3063,8 +3185,9 @@ def _render_cotizador_editor():
     if _pendientes:
         st.caption("⚠️ Pendiente de completar: " + " · ".join(_pendientes))
 
-    tab_datos, tab_productos, tab_tarifas, tab_costos_op, tab_memoria, tab_simulacion = st.tabs(
-        [label_datos, label_productos, label_tarifas, label_costos_op, label_memoria, label_simulacion],
+    tab_datos, tab_productos, tab_tarifas, tab_costos_op, tab_memoria, tab_simulacion, tab_documentos = st.tabs(
+        [label_datos, label_productos, label_tarifas, label_costos_op, label_memoria, label_simulacion,
+         label_documentos],
         default=label_datos, key=f"cot_tabs_{cot_id}",
     )
 
@@ -3440,6 +3563,18 @@ def _render_cotizador_editor():
         _cab_live["tc_venta"] = tc_venta
         _render_simulacion_venta(resultado, tc_venta)
 
+    # ============================================================
+    # Documentos de la cotización (Fase 8) — invoice/Packing List que manda
+    # el cliente antes de tener todavía dónde cargarlos (caso real que
+    # motivó esto: llegó por WhatsApp sin lugar en la cotización).
+    # ============================================================
+    with tab_documentos:
+        st.caption(
+            "Invoice y Packing List que te mande el cliente para esta cotización — Excel se puede "
+            "convertir a PDF con el botón 'A PDF' una vez subido, igual que en Importaciones."
+        )
+        _render_documentos_cotizacion(cot_id, cliente_id)
+
     def _guardar_cotizacion():
         db.save_cotizacion(
             cot_id,
@@ -3472,6 +3607,15 @@ def _render_cotizador_editor():
             contacto_vinculado = _marcar_ganado_por_cliente(cliente_id)
             if contacto_vinculado:
                 mensaje += f" '{contacto_vinculado['nombre']}' pasó a Cliente."
+        # Mismo criterio: mandar la cotización de verdad ("Enviada") es la
+        # evidencia real de que el contacto avanzó a Cotizado/Calificado —
+        # ya no alcanza con solo crear el borrador (ver _cotizar_contacto).
+        elif estado == "Enviada" and cliente_id:
+            contacto_vinculado = _asegurar_contacto_para_cliente(cliente_id)
+            if contacto_vinculado:
+                _avanzar_etapa_si_corresponde(
+                    contacto_vinculado["id"], "Cotizado", st.session_state.get("crm_autor", "")
+                )
         _cargar_estado_cotizacion(cot_id)
         _flash(mensaje)
 
@@ -3710,23 +3854,6 @@ def _dialog_confirmar_restaurar_backup():
 
 
 def _render_configuracion():
-    with st.container(border=True, key="cardwrap_config_parametros"):
-        st.markdown("#### ⚙️ Parámetros generales")
-        st.caption(
-            "Se guardan en la base y los usa toda la app — ningún valor de estos queda fijo en el código."
-        )
-        dias_actual = int(db.get_setting("dias_sin_respuesta", db.SETTINGS_DEFAULTS["dias_sin_respuesta"]))
-        with st.form("form_config_general"):
-            nuevo_valor = st.number_input(
-                "CRM — Días sin respuesta para considerar una cotización 'Enviada' como vencida "
-                "(usado en los sub-filtros de seguimiento del CRM)",
-                min_value=1, value=dias_actual, step=1,
-            )
-            if st.form_submit_button("💾 Guardar", type="primary"):
-                db.set_setting("dias_sin_respuesta", int(nuevo_valor))
-                _flash("Configuración guardada.")
-                st.rerun()
-
     with st.container(border=True, key="cardwrap_config_migracion"):
         st.markdown("#### 🔁 Migración retroactiva de contactos CRM")
         st.caption(
@@ -3872,6 +3999,14 @@ def _cambiar_estado_cotizacion(cot_id, cliente_id):
         contacto_vinculado = _marcar_ganado_por_cliente(cliente_id)
         if contacto_vinculado:
             mensaje += f" '{contacto_vinculado['nombre']}' pasó a Cliente."
+    # Mismo criterio que en _guardar_cotizacion: mandar la cotización
+    # ("Enviada") es la evidencia real de avance a Cotizado/Calificado.
+    elif nuevo_estado == "Enviada" and cliente_id:
+        contacto_vinculado = _asegurar_contacto_para_cliente(cliente_id)
+        if contacto_vinculado:
+            _avanzar_etapa_si_corresponde(
+                contacto_vinculado["id"], "Cotizado", st.session_state.get("crm_autor", "")
+            )
     if st.session_state.get("cot_cab", {}).get("id") == cot_id:
         st.session_state.cot_cab["estado"] = nuevo_estado
     _flash(mensaje)
@@ -4178,6 +4313,27 @@ def _dias_desde_actividad(c):
     return (datetime.now() - dt).days if dt else None
 
 
+# Umbrales fijos (no configurables a propósito, para no repetir el problema
+# del setting dias_sin_respuesta que nadie ajustaba): 0-3 días sin marca,
+# 4-7 ámbar, 8+ rojo. Mismos colores que ya usa el resto de la app
+# (COLOR_ETAPA["Cotizado"] / COLOR_ETAPA["Perdido"]), no hex nuevos.
+_COLOR_INACTIVIDAD_AMBAR = "#D97706"
+_COLOR_INACTIVIDAD_ROJO = "#DC2626"
+
+
+def _badge_inactividad(c):
+    """Badge de inactividad de un contacto, o None si está dentro de la
+    ventana "sin marca" (0-3 días) o si nunca tuvo actividad registrada
+    (fecha_alta ausente). Reemplaza a _seguimiento_vencido como señal de
+    alerta — próximo_seguimiento queda como recordatorio manual aparte, sin
+    colorear nada (ver Fase 4 del plan)."""
+    dias = _dias_desde_actividad(c)
+    if dias is None or dias <= 3:
+        return None
+    color = _COLOR_INACTIVIDAD_AMBAR if dias <= 7 else _COLOR_INACTIVIDAD_ROJO
+    return _badge(f"🕓 hace {dias} día(s)", color)
+
+
 def _relabel_transicion_etapas(texto):
     """Remapea un texto 'Anterior → Nueva' (formato de activity_log.texto
     para eventos cambio_etapa) a través de crm.ETAPA_LABEL — ej. 'Nuevo →
@@ -4218,21 +4374,31 @@ def _ver_ficha_contacto(contact_id):
 
 
 KANBAN_COLUMNAS = [
-    ("nuevos", "🆕 Nuevos"),
+    ("nuevos", "🆕 Prospectos"),
     ("contactados", "✅ Contactados"),
-    ("cotizados", "🧾 Cotizados"),
-    ("negociacion", "🤝 Negociación"),
+    ("cotizados", "🧾 Calificados"),
+    ("negociacion", "🤝 En negociación"),
     ("cliente", "🏆 Cliente"),
     ("perdidos", "❌ Descartado"),
 ]
 COTIZACION_SUBFILTROS = {
     "Todas": None,
     "A revisar": "a_revisar",
-    "Activas": "activa",
-    "Sin respuesta": "sin_respuesta",
+    "Enviadas": "enviada",
     "Aprobadas": "aprobada_pendiente",
-    "Estancadas": "estancado",
+    "Rechazadas": "rechazada",
 }
+
+# Fase 6 — ficha ampliada. Selectbox fijo para poder filtrar/ordenar por
+# provincia después (pedido explícito), a diferencia de rubro/cargo/localidad
+# que quedan como texto libre.
+_SIN_PROVINCIA = "— Sin especificar —"
+PROVINCIAS_AR = [
+    _SIN_PROVINCIA, "Buenos Aires", "CABA", "Catamarca", "Chaco", "Chubut", "Córdoba",
+    "Corrientes", "Entre Ríos", "Formosa", "Jujuy", "La Pampa", "La Rioja", "Mendoza",
+    "Misiones", "Neuquén", "Río Negro", "Salta", "San Juan", "San Luis", "Santa Cruz",
+    "Santa Fe", "Santiago del Estero", "Tierra del Fuego", "Tucumán",
+]
 
 
 def _render_carga_rapida_contacto():
@@ -4317,14 +4483,22 @@ def _dialog_eliminar_contacto_crm(contact_id, nombre):
         st.rerun()
 
 
-def _render_fila_contacto_crm(c, en_curso_por_cliente=None):
+def _render_fila_contacto_crm(c, en_curso_por_cliente=None, resumen_cot_pipeline=None, tipos_por_contacto=None):
     """Card de un contacto — mismo lenguaje visual que Clientes: barra de
     acento a la izquierda coloreada por etapa (crm.COLOR_ETAPA, vía el key
     f"filacrm_{slug}_{id}"), accesos directos de WhatsApp/mail/ficha de
     Cliente vinculado/eliminar (con confirmación) como íconos compactos,
-    badge rojo si el seguimiento está vencido (antes solo un ⚠️ chiquito
-    pegado a la fecha), y 4 botones en 2 filas de a 2 ('Cotizar'/'Ver
-    ficha →' arriba, 'Actualizar estado'/'Marcar como Descartado' abajo).
+    y 4 botones en 2 filas de a 2 ('Cotizar'/'Ver ficha →' arriba,
+    'Actualizar estado'/'Marcar como Descartado' abajo).
+
+    Fase 7: c2 (antes solo "📅 seguimiento · 🕓 actividad" + badge "Vencido"
+    si próximo_seguimiento pasó) ahora muestra el badge de inactividad de
+    umbral fijo (_badge_inactividad, reemplaza al de "Vencido" — próximo_
+    seguimiento queda de recordatorio sin colorear nada) y, si está
+    Calificado sin cotización enviada todavía, el paso del pipeline
+    operativo ("N/7 · paso"). resumen_cot_pipeline/tipos_por_contacto
+    vienen de _render_seccion_contactos (None si esta columna no es
+    Calificado — ahí no hace falta calcular nada de esto).
 
     en_curso_por_cliente no-None significa "estamos en la columna Cliente"
     (etapa 'Ganado', ver crm.kanban_grupo): ahí no tiene sentido "avanzar
@@ -4348,15 +4522,31 @@ def _render_fila_contacto_crm(c, en_curso_por_cliente=None):
 
         with c2:
             seguimiento_txt = _fmt_fecha(c.get("proximo_seguimiento"))
-            dias_act = _dias_desde_actividad(c)
-            actividad_txt = f"hace {dias_act} día(s)" if dias_act is not None else "sin actividad"
-            linea_seguimiento = f"📅 {seguimiento_txt} · " if seguimiento_txt else ""
-            st.markdown(
-                f'<div style="font-size:12px; color:var(--sb-text-secondary);">{linea_seguimiento}🕓 {actividad_txt}</div>',
-                unsafe_allow_html=True,
-            )
-            if _seguimiento_vencido(c):
-                st.markdown(f'<div style="margin-top:3px;">{_badge_vencido()}</div>', unsafe_allow_html=True)
+            if seguimiento_txt:
+                st.markdown(
+                    f'<div style="font-size:12px; color:var(--sb-text-secondary);">📅 {seguimiento_txt}</div>',
+                    unsafe_allow_html=True,
+                )
+            badge_inact = _badge_inactividad(c)
+            if badge_inact:
+                st.markdown(f'<div style="margin-top:3px;">{badge_inact}</div>', unsafe_allow_html=True)
+            # Pipeline operativo: solo Calificado ("Cotizado") y solo si
+            # todavía no mandó ninguna cotización (enviada o ya aprobada) —
+            # una vez enviada, el embudo pasa a Negociación y el pipeline
+            # deja de tener sentido acá.
+            if etapa == "Cotizado" and resumen_cot_pipeline is not None:
+                resumen = resumen_cot_pipeline.get(c.get("cliente_id"))
+                ya_avanzo = bool(resumen and (resumen.get("enviadas") or resumen.get("aprobadas")))
+                if not ya_avanzo:
+                    tipos = (tipos_por_contacto or {}).get(c["id"], set())
+                    pipeline = crm.pipeline_operativo(tipos)
+                    if pipeline:
+                        n, paso = pipeline
+                        st.markdown(
+                            f'<div style="font-size:12px; color:var(--sb-text-secondary); margin-top:3px;">'
+                            f'<b style="color:var(--sb-navy);">{n}/7</b> · {html.escape(paso)}</div>',
+                            unsafe_allow_html=True,
+                        )
 
         c3.markdown(_badge_etapa(etapa), unsafe_allow_html=True)
 
@@ -4450,22 +4640,29 @@ def _render_fila_contacto_crm(c, en_curso_por_cliente=None):
 def _render_seccion_contactos(contactos, key_prefix, mostrar_filtro_cotizacion=False, en_curso_por_cliente=None):
     """Un 'sector' del CRM (una etapa): lista de filas, cada una con su
     propio botón de acceso directo a la ficha."""
+    # Fase 7: el pipeline operativo (N/7) solo aplica a la columna
+    # Calificado ("cotizados") — mismo indicador (mostrar_filtro_cotizacion)
+    # que ya distingue esa columna, para no pagar estas 2 consultas de más
+    # en el resto de las columnas del embudo.
+    resumen_cot_pipeline = tipos_por_contacto = None
     if mostrar_filtro_cotizacion:
+        resumen_cot_pipeline = db.resumen_cotizaciones_por_cliente()
+        tipos_por_contacto = db.tipos_actividad_por_contacto()
+
         sub_filtro = st.selectbox(
             "Filtrar por seguimiento de la cotización", list(COTIZACION_SUBFILTROS.keys()),
             key=f"crm_cot_filtro_{key_prefix}",
         )
         clave_filtro = COTIZACION_SUBFILTROS[sub_filtro]
         if clave_filtro:
-            # Agregado por cliente (2 consultas SQL agrupadas, no una por
-            # contacto) — ver crm.estado_comercial para el criterio.
-            dias_sin_respuesta = int(db.get_setting("dias_sin_respuesta", db.SETTINGS_DEFAULTS["dias_sin_respuesta"]))
-            resumen_cot = db.resumen_cotizaciones_por_cliente(dias_sin_respuesta)
+            # Agregado por cliente (ya en resumen_cot_pipeline de arriba, no
+            # se repite la consulta) — ver crm.estado_comercial para el
+            # criterio.
             imp_por_cliente = db.contar_importaciones_por_cliente()
             contactos = [
                 c for c in contactos
                 if crm.estado_comercial(
-                    resumen_cot.get(c.get("cliente_id")),
+                    resumen_cot_pipeline.get(c.get("cliente_id")),
                     imp_por_cliente.get(c.get("cliente_id"), 0) > 0,
                 ) == clave_filtro
             ]
@@ -4476,7 +4673,10 @@ def _render_seccion_contactos(contactos, key_prefix, mostrar_filtro_cotizacion=F
         return
 
     for c in contactos[:LIMITE_FILAS_CONTACTOS]:
-        _render_fila_contacto_crm(c, en_curso_por_cliente=en_curso_por_cliente)
+        _render_fila_contacto_crm(
+            c, en_curso_por_cliente=en_curso_por_cliente,
+            resumen_cot_pipeline=resumen_cot_pipeline, tipos_por_contacto=tipos_por_contacto,
+        )
     if len(contactos) > LIMITE_FILAS_CONTACTOS:
         st.caption(f"+{len(contactos) - LIMITE_FILAS_CONTACTOS} más — refiná la búsqueda para verlos")
 
@@ -4614,14 +4814,17 @@ def _migrar_contactos_retroactivos():
     """Migración de una sola corrida: crea el contacto de CRM para cada
     cliente que todavía no lo tiene (db.get_contact_by_cliente_id devuelve
     None), en la etapa que corresponde a la evidencia real que ya acumuló —
-    no todos arrancan en "Nuevo". Misma prioridad de señales que
-    crm.estado_comercial() (importación > cotización aprobada > cualquier
-    cotización > nada), colapsada a las 3 etapas que hacen falta acá.
+    no todos arrancan en "Nuevo"/Prospecto. Misma prioridad de señales que
+    crm.estado_comercial() (importación > cotización aprobada > cotización
+    ENVIADA > nada), colapsada a las 3 etapas que hacen falta acá. El corte
+    en "enviadas" (no "total") es a propósito: desde la Fase 4, un borrador
+    sin mandar ya no cuenta como evidencia de avance — mismo criterio que
+    _cambiar_estado_cotizacion/_guardar_cotizacion, para que este backfill
+    no deje contactos "adelantados" con evidencia que ya no califica.
     Devuelve [(nombre_cliente, etapa_asignada), ...] para poder verificar el
     resultado. Pensada para correrse una vez (consola o script), no para
     llamarse en cada request."""
-    dias_sin_respuesta = int(db.get_setting("dias_sin_respuesta", db.SETTINGS_DEFAULTS["dias_sin_respuesta"]))
-    resumen_cot = db.resumen_cotizaciones_por_cliente(dias_sin_respuesta)
+    resumen_cot = db.resumen_cotizaciones_por_cliente()
     imp_por_cliente = db.contar_importaciones_por_cliente()
     autor = "Migración retroactiva"
     migrados = []
@@ -4632,7 +4835,7 @@ def _migrar_contactos_retroactivos():
         tiene_importacion = imp_por_cliente.get(cliente["id"], 0) > 0
         if tiene_importacion or (resumen and resumen.get("aprobadas")):
             etapa = "Ganado"
-        elif resumen and resumen.get("total"):
+        elif resumen and resumen.get("enviadas"):
             etapa = "Cotizado"
         else:
             etapa = crm.STAGE_INICIAL
@@ -4656,17 +4859,11 @@ def _marcar_ganado_por_cliente(cliente_id, autor=""):
 
 
 def _agregar_nota_contacto(contact_id, texto, autor):
-    """Agrega una nota y, si el contacto todavía está en la etapa inicial
-    ('Nuevo'), lo avanza automáticamente a la siguiente etapa del embudo —
-    una nota es evidencia de que alguien ya se ocupó del contacto. No toca
-    contactos que ya están en una etapa posterior."""
+    """Agrega una nota — YA NO avanza etapa sola: una nota cualquiera no es
+    evidencia suficiente de avance real. Prospecto→Contactado pasa
+    únicamente por email/WhatsApp registrados (_render_acciones_rapidas,
+    vía contacto_email/contacto_whatsapp), evidencia concreta de gestión."""
     db.add_activity(contact_id, "nota", texto, autor)
-    contacto = db.get_contact(contact_id)
-    etapa_actual = contacto.get("etapa") or crm.STAGE_INICIAL
-    if etapa_actual == crm.STAGE_INICIAL:
-        siguiente = crm.siguiente_etapa(etapa_actual)
-        if siguiente:
-            db.change_etapa_contacto(contact_id, siguiente, autor)
 
 
 def _cotizar_contacto(contact_id):
@@ -4675,20 +4872,30 @@ def _cotizar_contacto(contact_id):
     Clientes, crea uno a partir de sus datos (nombre/empresa, email,
     WhatsApp) y lo vincula — así se reutiliza tal cual el motor de
     cotizador que ya existe para clientes, en vez de duplicarlo para
-    contactos. Además, generar una cotización es evidencia de avance real
-    en el embudo, así que sube la etapa a 'Cotizado' si corresponde."""
+    contactos. Ya NO avanza la etapa acá — crear un borrador no es evidencia
+    de nada por sí sola (ver _cotizar_cliente); el avance a
+    'Cotizado'/Calificado pasa por _cambiar_estado_cotizacion cuando esa
+    cotización se manda de verdad (estado 'Enviada')."""
     contacto = db.get_contact(contact_id)
     cliente_id = contacto.get("cliente_id")
     if not cliente_id:
+        # Traspaso acordado: rubro/provincia/localidad del contacto CRM
+        # pasan al Cliente nuevo, para no terminar con dos fichas del mismo
+        # prospecto con datos distintos. Clientes no tiene provincia/
+        # localidad como columnas propias (solo "dirección" libre), así que
+        # se combinan en una sola línea ahí.
+        provincia = contacto.get("provincia") or ""
+        localidad = contacto.get("localidad") or ""
+        direccion = ", ".join(p for p in (localidad, provincia) if p)
         cliente_id = db.create_cliente(
             nombre=contacto.get("empresa") or contacto["nombre"],
             email=contacto.get("email") or "",
             telefono=contacto.get("whatsapp") or "",
+            direccion=direccion,
+            rubro=contacto.get("rubro") or "",
             notas=f"Cliente creado automáticamente desde el contacto CRM '{contacto['nombre']}'.",
         )
         db.link_contact_cliente(contact_id, cliente_id)
-    autor = st.session_state.get("crm_autor", "")
-    _avanzar_etapa_si_corresponde(contact_id, "Cotizado", autor)
     _cotizar_cliente(cliente_id)
 
 
@@ -4783,6 +4990,25 @@ def _render_ficha_contacto(c):
                     "Próximo seguimiento", value=_parse_fecha(c.get("proximo_seguimiento")),
                     format="DD/MM/YYYY", key=f"cps_{c['id']}",
                 )
+                # Fase 6 — ficha ampliada. Texto simple (mismo patrón que el
+                # resto de estos campos), no selectbox+"Otro": adentro de un
+                # st.form los widgets no re-renderizan hasta el submit, así
+                # que un campo "Otro" condicional no aparecería en el mismo
+                # envío en el que se elige "Otro" — UX rota. Queda pendiente
+                # para cuando se resuelva esa interacción (fuera del form,
+                # como ya está "Etapa" más arriba).
+                c9, c10 = st.columns(2)
+                provincia = c9.selectbox(
+                    "Provincia", PROVINCIAS_AR,
+                    index=PROVINCIAS_AR.index(c.get("provincia")) if c.get("provincia") in PROVINCIAS_AR else 0,
+                    key=f"cprov_{c['id']}",
+                )
+                localidad = c10.text_input("Localidad", value=c.get("localidad") or "", key=f"cloc_{c['id']}")
+                c11, c12 = st.columns(2)
+                rubro = c11.text_input("Rubro", value=c.get("rubro") or "", key=f"crub_{c['id']}")
+                cargo_contacto = c12.text_input(
+                    "Cargo del contacto", value=c.get("cargo_contacto") or "", key=f"ccargo_{c['id']}"
+                )
                 b1, b2 = st.columns(2)
                 if b1.form_submit_button("💾 Guardar cambios"):
                     email_norm = crm.normalizar_email(email)
@@ -4795,6 +5021,7 @@ def _render_ficha_contacto(c):
                             c["id"], nombre, empresa, email_norm, crm.normalizar_whatsapp(whatsapp),
                             origen, asignado_a, proximo_seguimiento.isoformat() if proximo_seguimiento else None,
                             cuit,
+                            provincia if provincia != _SIN_PROVINCIA else "", localidad, rubro, cargo_contacto,
                         )
                         st.success("Actualizado.")
                         st.rerun()
@@ -4902,6 +5129,10 @@ def _procesar_importacion(filas, actualizar_duplicados, ejecutar, autor=""):
                     origen=f["origen"] or dup.get("origen") or "",
                     asignado_a=f["asignado_a"] or dup.get("asignado_a") or "",
                     proximo_seguimiento=dup.get("proximo_seguimiento"),
+                    provincia=f["provincia"] or dup.get("provincia") or "",
+                    localidad=f["localidad"] or dup.get("localidad") or "",
+                    rubro=f["rubro"] or dup.get("rubro") or "",
+                    cargo_contacto=f["cargo_contacto"] or dup.get("cargo_contacto") or "",
                 )
             estado = "Duplicado — actualizado" if (ejecutar and actualizar_duplicados) else "Duplicado — se omite"
             resultados.append({**f, "estado": estado, "contacto_id": dup["id"]})
@@ -4913,6 +5144,8 @@ def _procesar_importacion(filas, actualizar_duplicados, ejecutar, autor=""):
                 new_id = db.create_contact(
                     f["nombre"], f["empresa"], f["email"], f["whatsapp"], f["origen"],
                     crm.STAGE_INICIAL, f["asignado_a"],
+                    provincia=f["provincia"], localidad=f["localidad"],
+                    rubro=f["rubro"], cargo_contacto=f["cargo_contacto"],
                 )
                 db.add_activity(new_id, "nota", "Alta por importación de archivo.", autor)
             resultados.append({**f, "estado": "Nuevo", "contacto_id": new_id})
@@ -4952,6 +5185,8 @@ def _render_importar_contactos():
     etiquetas = {
         "nombre": "Nombre *", "empresa": "Empresa", "email": "Email",
         "whatsapp": "WhatsApp / Teléfono", "origen": "Origen", "asignado_a": "Asignado a",
+        "provincia": "Provincia", "localidad": "Localidad",
+        "rubro": "Rubro", "cargo_contacto": "Cargo del contacto",
     }
     mapeo = {}
     cols_form = st.columns(3)

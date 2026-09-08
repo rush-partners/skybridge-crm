@@ -32,7 +32,38 @@ TIPOS_ACTIVIDAD = {
     "contacto_whatsapp": "💬 Contacto por WhatsApp",
     "respuesta_recibida": "✅ Respuesta recibida",
     "cambio_etapa": "🔀 Cambio de etapa",
+    # Nuevos (Fase 5): necesidad_confirmada es el disparador de
+    # Contactado→Calificado (señal propia, no se fusiona con el invoice —
+    # ver caso real de sourcing antes de tener invoice). Los otros 6 son los
+    # pasos del "pipeline operativo" (PIPELINE_PASOS más abajo) que se
+    # muestran una vez Calificado, mientras la cotización todavía no se
+    # mandó — relevamiento_confirmado y documentacion_recibida reemplazan al
+    # 'nota' genérico que tenían antes esos 2 pasos, para que el contador
+    # "N/7" sea confiable.
+    "necesidad_confirmada": "🎯 Necesidad confirmada",
+    "relevamiento_confirmado": "📋 Relevamiento del pedido",
+    "proveedor_confirmado": "🏭 Proveedor confirmado",
+    "productos_confirmados": "📦 Productos confirmados",
+    "documentacion_recibida": "📄 Documentación recibida",
+    "consulta_despachante": "🛃 Consulta a despachante",
+    "consulta_forwarder": "🚢 Consulta a forwarder",
 }
+
+# Orden operativo de los 7 pasos del "pipeline" que se muestra en la card de
+# un contacto Calificado sin cotización enviada todavía (ver Fase 7 — acá
+# solo la lógica, todavía sin engancharse a ninguna pantalla). OJO: este
+# orden es una reconstrucción mía a partir del resumen de la charla, no
+# tengo el texto original del ticket con la numeración exacta — confirmar
+# con Tom antes de dar por cerrada la Fase 7.
+PIPELINE_PASOS = [
+    "relevamiento_confirmado",
+    "necesidad_confirmada",
+    "proveedor_confirmado",
+    "documentacion_recibida",
+    "productos_confirmados",
+    "consulta_despachante",
+    "consulta_forwarder",
+]
 
 COLOR_ETAPA = {
     "Nuevo": "#64748B", "Contactado": "#2563EB", "Cotizado": "#D97706",
@@ -57,7 +88,13 @@ ETAPA_SLUG = {
 # en cotizaciones.contenedor/etd_eta/carrier/freetime (columnas que guardan
 # algo distinto de su nombre literal). Identidad (.get(etapa, etapa)) para
 # el resto de las etapas, que no cambian de nombre.
-ETAPA_LABEL = {"Ganado": "Cliente", "Perdido": "Descartado"}
+ETAPA_LABEL = {
+    "Nuevo": "Prospecto",
+    "Cotizado": "Calificado",
+    "Negociación": "En negociación",
+    "Ganado": "Cliente",
+    "Perdido": "Descartado",
+}
 
 _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
@@ -247,24 +284,46 @@ def estado_comercial(resumen_cot, tiene_importacion: bool):
     Prioridad de señales, de más a menos fuerte:
     'ganado' (ya tiene una importación — evidencia dura, pisa cualquier
     otra señal) > 'aprobada_pendiente' (cotización aprobada, todavía sin
-    importación creada) > 'activa' (hay una enviada dentro del umbral de
-    respuesta) > 'sin_respuesta' (hay una enviada, pero vencida) >
-    'a_revisar' (todo lo que tiene son borradores, nunca se envió nada) >
-    'estancado' (todo lo demás: solo rechazadas y/o enviadas vencidas, sin
-    nada pendiente ni aprobado — candidato a marcar como Perdido)."""
+    importación creada) > 'enviada' (hay al menos una enviada — sin
+    distinguir vigente/vencida por fecha: esa distinción la da ahora el
+    badge de inactividad del contacto, no el estado de la cotización) >
+    'a_revisar' (nada resuelto todavía: borradores y/o rechazadas, pero no
+    el 100% rechazadas) > 'rechazada' (TODAS sus cotizaciones están
+    rechazadas, sin ninguna pendiente ni aprobada — candidato a marcar
+    como Descartado)."""
     if tiene_importacion:
         return "ganado"
     if not resumen_cot or not resumen_cot.get("total"):
         return None
     if resumen_cot.get("aprobadas"):
         return "aprobada_pendiente"
-    if resumen_cot.get("enviadas_vigentes"):
-        return "activa"
-    if resumen_cot.get("enviadas_vencidas"):
-        return "sin_respuesta"
-    if resumen_cot.get("borradores") == resumen_cot.get("total"):
-        return "a_revisar"
-    return "estancado"
+    if resumen_cot.get("enviadas"):
+        return "enviada"
+    if resumen_cot.get("rechazadas") == resumen_cot.get("total"):
+        return "rechazada"
+    return "a_revisar"
+
+
+def pipeline_operativo(tipos_logueados: set):
+    """Progreso del "pipeline operativo" (7 pasos, PIPELINE_PASOS) de un
+    contacto Calificado que todavía no mandó cotización — pura lógica
+    (activity_log → paso), sin tocar ninguna pantalla todavía (se engancha
+    recién en la Fase 7). tipos_logueados: set de c["tipo"] de
+    activity_log para ese contacto (cualquier cantidad de veces cada uno,
+    acá solo importa si pasó o no al menos una vez).
+
+    Devuelve (n, etiqueta): n = pasos completados (0-7); etiqueta = nombre
+    del PRÓXIMO paso pendiente (lo que falta para seguir), o el del último
+    paso completado si ya están los 7. None si no hay ningún paso
+    completado todavía (contacto recién Calificado, sin nada logueado)."""
+    completados = [p for p in PIPELINE_PASOS if p in tipos_logueados]
+    n = len(completados)
+    if n == 0:
+        return None
+    if n == len(PIPELINE_PASOS):
+        return n, TIPOS_ACTIVIDAD[PIPELINE_PASOS[-1]]
+    siguiente = next(p for p in PIPELINE_PASOS if p not in tipos_logueados)
+    return n, TIPOS_ACTIVIDAD[siguiente]
 
 
 def tasa_respuesta(contactos: list, actividad_por_contacto: dict) -> dict:
@@ -318,6 +377,11 @@ CAMPOS_IMPORTABLES = {
     "whatsapp": ["whatsapp", "telefono", "celular", "phone", "tel"],
     "origen": ["origen", "fuente", "source"],
     "asignado_a": ["asignado", "responsable", "vendedor", "owner"],
+    # Fase 6 — ficha ampliada, también importables desde Excel/CSV.
+    "provincia": ["provincia", "province", "estado"],
+    "localidad": ["localidad", "ciudad", "city"],
+    "rubro": ["rubro", "sector", "industria", "industry"],
+    "cargo_contacto": ["cargo", "puesto", "rol", "position", "title"],
 }
 
 
@@ -348,4 +412,8 @@ def preparar_fila_contacto(fila: dict) -> dict:
         "whatsapp": normalizar_whatsapp(fila.get("whatsapp")),
         "origen": (fila.get("origen") or "").strip(),
         "asignado_a": (fila.get("asignado_a") or "").strip(),
+        "provincia": (fila.get("provincia") or "").strip(),
+        "localidad": (fila.get("localidad") or "").strip(),
+        "rubro": (fila.get("rubro") or "").strip(),
+        "cargo_contacto": (fila.get("cargo_contacto") or "").strip(),
     }

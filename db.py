@@ -294,6 +294,21 @@ CREATE TABLE IF NOT EXISTS importacion_documentos (
     subido_en TEXT DEFAULT (datetime('now','localtime'))
 );
 
+-- Fase 8: invoice/Packing List (u otro) subidos directo a una cotización —
+-- mismo esquema que importacion_documentos, cambiando importacion_id por
+-- cotizacion_id. El contenido va en la columna 'contenido' (BLOB) desde el
+-- arranque acá (no como en importacion_documentos, que la sumó después vía
+-- COLUMNAS_NUEVAS por venir de antes de la migración a Turso) — no hay
+-- razón para repetir esa deuda técnica en una tabla nueva.
+CREATE TABLE IF NOT EXISTS cotizacion_documentos (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    cotizacion_id INTEGER NOT NULL REFERENCES cotizaciones(id) ON DELETE CASCADE,
+    categoria TEXT NOT NULL,
+    nombre_archivo TEXT NOT NULL,
+    contenido BLOB,
+    subido_en TEXT DEFAULT (datetime('now','localtime'))
+);
+
 CREATE TABLE IF NOT EXISTS cliente_documentos (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     cliente_id INTEGER NOT NULL REFERENCES clientes(id) ON DELETE CASCADE,
@@ -356,9 +371,9 @@ CREATE TABLE IF NOT EXISTS usuarios (
 # Valores por defecto de `settings`: se insertan una sola vez (INSERT OR
 # IGNORE) en init_db(), así la fila siempre existe y la UI de Configuración
 # no tiene que manejar el caso "todavía no se guardó nada".
-SETTINGS_DEFAULTS = {
-    "dias_sin_respuesta": "3",
-}
+# dias_sin_respuesta sacado: la señal de inactividad ahora usa umbrales fijos
+# (ver _badge_inactividad en app.py) en vez de un setting que nadie ajustaba.
+SETTINGS_DEFAULTS = {}
 
 DEFAULT_GASTOS = [
     ("Flete", "USD", "PESO", "NO", 0.0),
@@ -639,6 +654,13 @@ COLUMNAS_NUEVAS = {
     "contacts": {
         "cliente_id": "INTEGER REFERENCES clientes(id) ON DELETE SET NULL",
         "cuit": "TEXT",
+        # Fase 6 — ficha ampliada. Con provincia + localidad alcanza acá (sin
+        # un campo "Dirección" de calle/altura aparte — ese ya existe en
+        # Clientes, ver traspaso al convertir contacto→cliente).
+        "provincia": "TEXT",
+        "localidad": "TEXT",
+        "rubro": "TEXT",
+        "cargo_contacto": "TEXT",
     },
     "usuarios": {
         "intentos_fallidos": "INTEGER DEFAULT 0",
@@ -801,29 +823,27 @@ def list_cotizaciones(search: str = "", cliente_id=None, producto: str = "", fec
     return [dict(r) for r in rows]
 
 
-def resumen_cotizaciones_por_cliente(dias_sin_respuesta: int):
+def resumen_cotizaciones_por_cliente():
     """Agregado del historial COMPLETO de cotizaciones de cada cliente (una
     sola consulta SQL agrupada), no solo la más reciente — con cientos de
     cotizaciones acumuladas por cliente, mirar nada más la última da una
     foto parcial (ej. un cliente con 40 rechazadas y 1 recién enviada se
-    clasificaría por la enviada, ignorando el patrón). El corte de
-    "enviada vigente vs. vencida" usa el umbral dias_sin_respuesta ya
-    configurado en Ajustes, así queda consistente con "⏰ Seguimiento".
-    Ver crm.estado_comercial(), que consume este resumen."""
+    clasificaría por la enviada, ignorando el patrón). Ya no distingue
+    "enviada vigente vs. vencida" por fecha (esa distinción hoy la da el
+    badge de inactividad del contacto en el CRM, no el estado de la
+    cotización — ver _dias_desde_actividad). Ver crm.estado_comercial(),
+    que consume este resumen."""
     conn = get_connection()
-    corte = (datetime.now() - timedelta(days=dias_sin_respuesta)).strftime("%Y-%m-%d %H:%M:%S")
     rows = conn.execute(
         """SELECT cliente_id,
                   COUNT(*) AS total,
                   SUM(CASE WHEN estado='Aprobada' THEN 1 ELSE 0 END) AS aprobadas,
                   SUM(CASE WHEN estado='Rechazada' THEN 1 ELSE 0 END) AS rechazadas,
-                  SUM(CASE WHEN estado='Enviada' AND actualizado_en >= ? THEN 1 ELSE 0 END) AS enviadas_vigentes,
-                  SUM(CASE WHEN estado='Enviada' AND actualizado_en < ? THEN 1 ELSE 0 END) AS enviadas_vencidas,
+                  SUM(CASE WHEN estado='Enviada' THEN 1 ELSE 0 END) AS enviadas,
                   SUM(CASE WHEN estado IS NULL OR estado='Borrador' THEN 1 ELSE 0 END) AS borradores
            FROM cotizaciones
            WHERE cliente_id IS NOT NULL
            GROUP BY cliente_id""",
-        (corte, corte),
     ).fetchall()
     conn.close()
     return {r["cliente_id"]: dict(r) for r in rows}
@@ -1143,6 +1163,65 @@ def rename_documento(doc_id, nuevo_nombre):
     conn.close()
 
 
+# ---------- Documentos de cotización (Fase 8) — espejo 1:1 de las 6 de
+# arriba, cambiando importacion_id por cotizacion_id y la tabla. ----------
+
+def add_documento_cotizacion(cotizacion_id, categoria, nombre_archivo, contenido: bytes):
+    conn = get_connection()
+    conn.execute(
+        """INSERT INTO cotizacion_documentos (cotizacion_id, categoria, nombre_archivo, contenido)
+           VALUES (?,?,?,?)""",
+        (cotizacion_id, categoria, nombre_archivo, contenido),
+    )
+    conn.commit()
+    conn.close()
+
+
+def contar_documentos_cotizacion(cotizacion_id):
+    conn = get_connection()
+    row = conn.execute(
+        "SELECT COUNT(*) AS n FROM cotizacion_documentos WHERE cotizacion_id=?", (cotizacion_id,)
+    ).fetchone()
+    conn.close()
+    return row["n"] if row else 0
+
+
+def list_documentos_cotizacion(cotizacion_id, categoria=None):
+    conn = get_connection()
+    if categoria:
+        rows = conn.execute(
+            "SELECT * FROM cotizacion_documentos WHERE cotizacion_id=? AND categoria=? ORDER BY id",
+            (cotizacion_id, categoria),
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            "SELECT * FROM cotizacion_documentos WHERE cotizacion_id=? ORDER BY id", (cotizacion_id,)
+        ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def get_documento_cotizacion(doc_id):
+    conn = get_connection()
+    row = conn.execute("SELECT * FROM cotizacion_documentos WHERE id=?", (doc_id,)).fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
+def delete_documento_cotizacion(doc_id):
+    conn = get_connection()
+    conn.execute("DELETE FROM cotizacion_documentos WHERE id=?", (doc_id,))
+    conn.commit()
+    conn.close()
+
+
+def rename_documento_cotizacion(doc_id, nuevo_nombre):
+    conn = get_connection()
+    conn.execute("UPDATE cotizacion_documentos SET nombre_archivo=? WHERE id=?", (nuevo_nombre, doc_id))
+    conn.commit()
+    conn.close()
+
+
 # ---------- Documentos de cliente ----------
 
 def contar_documentos_cliente(cliente_id):
@@ -1242,12 +1321,15 @@ def find_contacto_duplicado(email: str = "", whatsapp: str = ""):
 
 
 def create_contact(nombre, empresa="", email="", whatsapp="", origen="", etapa="Nuevo",
-                    asignado_a="", proximo_seguimiento=None, cuit=""):
+                    asignado_a="", proximo_seguimiento=None, cuit="",
+                    provincia="", localidad="", rubro="", cargo_contacto=""):
     conn = get_connection()
     cur = conn.execute(
-        """INSERT INTO contacts (nombre, empresa, cuit, email, whatsapp, origen, etapa, asignado_a, proximo_seguimiento)
-           VALUES (?,?,?,?,?,?,?,?,?)""",
-        (nombre, empresa, cuit, email, whatsapp, origen, etapa, asignado_a, proximo_seguimiento),
+        """INSERT INTO contacts (nombre, empresa, cuit, email, whatsapp, origen, etapa, asignado_a,
+           proximo_seguimiento, provincia, localidad, rubro, cargo_contacto)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+        (nombre, empresa, cuit, email, whatsapp, origen, etapa, asignado_a, proximo_seguimiento,
+         provincia, localidad, rubro, cargo_contacto),
     )
     conn.commit()
     new_id = cur.lastrowid
@@ -1256,15 +1338,18 @@ def create_contact(nombre, empresa="", email="", whatsapp="", origen="", etapa="
 
 
 def update_contact(contact_id, nombre, empresa="", email="", whatsapp="", origen="",
-                    asignado_a="", proximo_seguimiento=None, cuit=""):
+                    asignado_a="", proximo_seguimiento=None, cuit="",
+                    provincia="", localidad="", rubro="", cargo_contacto=""):
     # La etapa NO se actualiza acá: cambia únicamente por change_etapa_contacto,
     # que además deja registro en activity_log — así el timeline nunca queda
     # desincronizado de la etapa actual del contacto.
     conn = get_connection()
     conn.execute(
         """UPDATE contacts SET nombre=?, empresa=?, cuit=?, email=?, whatsapp=?, origen=?,
-           asignado_a=?, proximo_seguimiento=? WHERE id=?""",
-        (nombre, empresa, cuit, email, whatsapp, origen, asignado_a, proximo_seguimiento, contact_id),
+           asignado_a=?, proximo_seguimiento=?, provincia=?, localidad=?, rubro=?, cargo_contacto=?
+           WHERE id=?""",
+        (nombre, empresa, cuit, email, whatsapp, origen, asignado_a, proximo_seguimiento,
+         provincia, localidad, rubro, cargo_contacto, contact_id),
     )
     conn.commit()
     conn.close()
@@ -1317,6 +1402,20 @@ def list_all_activity():
     rows = conn.execute("SELECT * FROM activity_log ORDER BY fecha").fetchall()
     conn.close()
     return [dict(r) for r in rows]
+
+
+def tipos_actividad_por_contacto():
+    """{contact_id: set de tipos ya logueados} de TODOS los contactos — una
+    sola consulta liviana (solo contact_id + tipo, no la fila entera como
+    list_all_activity) para derivar crm.pipeline_operativo() sin una query
+    por contacto (Fase 7)."""
+    conn = get_connection()
+    rows = conn.execute("SELECT contact_id, tipo FROM activity_log").fetchall()
+    conn.close()
+    resultado = {}
+    for r in rows:
+        resultado.setdefault(r["contact_id"], set()).add(r["tipo"])
+    return resultado
 
 
 def link_contact_cliente(contact_id, cliente_id):
