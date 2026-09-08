@@ -122,6 +122,22 @@ __SB_VARS__
         [data-testid="stSidebar"] {
             background: var(--sb-zone) !important;
             border-right: 1px solid var(--sb-border);
+            /* Antes usaba el ancho por defecto de Streamlit (~300px) aunque el
+            contenido real (nav + tarjeta de cuenta) necesita bastante menos —
+            eso dejaba un panel lateral desproporcionadamente ancho y le robaba
+            espacio horizontal al contenido principal. !important porque
+            Streamlit fija el ancho inline en el propio elemento (el handle de
+            redimensionado lo pisa al arrastrar; el usuario todavía puede
+            agrandarlo a mano si quiere). */
+            width: 270px !important; min-width: 270px !important;
+        }
+        /* La navegación (Panel de Control/Clientes/Cotizador/CRM) traía su
+        propio ancho "de contenido" (el radio de Streamlit no estira su
+        contenedor al 100% del sidebar por default) — mucho más angosto que
+        la tarjeta de cuenta de abajo, que sí ocupa el ancho completo. Con
+        esto ambos quedan del mismo ancho y alineados en el borde derecho. */
+        [class*="st-key-pagina_nav"] {
+            width: 100% !important;
         }
         /* Sidebar como columna real (logo/nav arriba, cuenta siempre al pie,
         pegada al borde inferior) en vez de que la tarjeta de cuenta quede
@@ -416,14 +432,31 @@ __SB_VARS__
             background: var(--sb-surface) !important; border: 1px solid var(--sb-border) !important;
             border-radius: 10px !important; padding: 10px 10px !important;
         }
+        /* Avatar, nombre y los 2 botones vivían en columnas con
+        vertical_alignment="center", pero Streamlit las estira (align-items:
+        stretch) en vez de centrarlas — el botón (con su propio alto interno
+        de 40px) terminaba más arriba que el avatar/nombre (30px/20px), cada
+        ítem de la fila a una altura distinta. Forzado acá para que los 4
+        queden centrados sobre el mismo eje, sin depender de ese parámetro. */
+        [class*="st-key-sidebar_account_card"] [data-testid="stHorizontalBlock"] {
+            align-items: center !important;
+        }
         .sb-avatar {
             width: 30px; height: 30px; border-radius: 50%; background: var(--sb-orange);
             color: #FFFFFF; font-weight: 800; font-size: 12.5px;
             display: flex; align-items: center; justify-content: center;
+            /* -8px: el botón de tema/cerrar sesión (columna vecina) viene con
+            un alto propio de Streamlit que lo deja 8px más arriba de lo que
+            marca vertical_alignment="center" — constante sin importar el
+            ancho de la fila. Se compensa acá (en vez de en el botón, cuyo
+            margen no mueve su contenido de forma predecible) para que avatar,
+            nombre y los 2 íconos queden todos sobre el mismo eje. */
+            margin-top: -16px;
         }
         .sb-account-name {
             font-size: 12.5px; font-weight: 700; color: var(--sb-navy);
             overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+            margin-top: -16px;
         }
         .sb-account-role {
             font-size: 10.5px; color: var(--sb-text-secondary); margin-top: -1px;
@@ -4747,12 +4780,11 @@ def main():
     # tarjeta con avatar — mismo patrón que usan Slack/Notion/etc.: la
     # identidad activa y sus acciones, agrupadas, al fondo del todo.
     with st.sidebar.container(key="sidebar_account_card"):
-        # Proporciones más ajustadas al contenido real (nombre corto tipo
-        # "QA Tester 2"/"ADMIN") — antes col_nombre reservaba más ancho del
-        # que el texto ocupaba, y dejaba un hueco muerto grande entre el
-        # nombre y los botones en vez de una fila compacta y pareja.
+        # Proporciones ajustadas al ancho reducido del sidebar (ver
+        # "width: 270px" en _inyectar_estilos) — más peso relativo para el
+        # nombre así no se trunca de más, y los botones angostos y parejos.
         col_avatar, col_nombre, col_tema, col_logout = st.columns(
-            [0.55, 1.05, 0.48, 0.48], vertical_alignment="center", gap="small",
+            [0.5, 1.3, 0.42, 0.42], vertical_alignment="center", gap="small",
         )
         nombre_usuario = st.session_state.usuario_autenticado["nombre"]
         inicial = (nombre_usuario or "?").strip()[:1].upper() or "?"
