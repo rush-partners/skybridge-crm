@@ -1230,7 +1230,7 @@ def _gate_login():
     with col_centro:
         st.markdown(
             '<div class="sb-login-logo">SKY<span>BRIDGE</span></div>'
-            '<div class="sb-login-tagline">ERP · Comercio Exterior</div>',
+            '<div class="sb-login-tagline">CRM COMEX</div>',
             unsafe_allow_html=True,
         )
         with st.container(key="sb_login_card"):
@@ -2783,14 +2783,14 @@ def _render_cotizador_editor():
     # A propósito NO incluye venta/ganancia/rentabilidad: este resumen es
     # el costeo de la importación (lo que se paga), no el negocio de venta
     # — eso es responsabilidad del vendedor y vive solo en "🔟 Simulación
-    # de venta". Los 3 ítems (Precio FOB, Total Final, Incidencia s/FOB)
+    # de venta". Los 3 ítems (Costo FOB, Costo Final, Incidencia s/FOB)
     # son un pedido explícito del dueño de la app, en USD.
     # ============================================================
     with st.container(border=True, key=f"resultgroup_resumentop_{cot_id}"):
         st.markdown('<div class="sb-card-title">📊 Resumen de costeo</div>', unsafe_allow_html=True)
         r1, r2, r3 = st.columns(3)
-        r1.metric("Precio FOB", money(resultado["fob_total_sum"]))
-        r2.metric("Total Final", money(resultado["total_c_iva_usd"]))
+        r1.metric("Costo FOB", money(resultado["fob_total_sum"]))
+        r2.metric("Costo Final", money(resultado["total_c_iva_usd"]))
         r3.metric("Incidencia s/FOB", pct(resultado["incidencia_fob"]))
 
     # ============================================================
@@ -4771,8 +4771,12 @@ def main():
     # tarjeta con avatar — mismo patrón que usan Slack/Notion/etc.: la
     # identidad activa y sus acciones, agrupadas, al fondo del todo.
     with st.sidebar.container(key="sidebar_account_card"):
+        # Proporciones más ajustadas al contenido real (nombre corto tipo
+        # "QA Tester 2"/"ADMIN") — antes col_nombre reservaba más ancho del
+        # que el texto ocupaba, y dejaba un hueco muerto grande entre el
+        # nombre y los botones en vez de una fila compacta y pareja.
         col_avatar, col_nombre, col_tema, col_logout = st.columns(
-            [0.62, 1.9, 0.55, 0.55], vertical_alignment="center",
+            [0.55, 1.05, 0.48, 0.48], vertical_alignment="center", gap="small",
         )
         nombre_usuario = st.session_state.usuario_autenticado["nombre"]
         inicial = (nombre_usuario or "?").strip()[:1].upper() or "?"
