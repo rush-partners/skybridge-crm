@@ -2480,16 +2480,6 @@ def _render_productos():
     if not productos:
         productos.append(_nueva_fila_producto())
 
-    resumen = [{
-        "#": i + 1,
-        "Descripción": ("⚠️ " if (_f_local(p.get("fob_unit")) == 0 or _f_local(p.get("cantidad")) == 0) else "")
-            + (p.get("descripcion") or "(sin nombre)"),
-        "FOB Unit.": money(_f_local(p.get("fob_unit"))),
-        "Cantidad": f'{_f_local(p.get("cantidad")):,.2f}',
-        "FOB Total": money(_f_local(p.get("fob_unit")) * _f_local(p.get("cantidad"))),
-    } for i, p in enumerate(productos)]
-    _tabla_html(resumen, alinear_derecha=["#", "FOB Unit.", "Cantidad", "FOB Total"])
-
     borrar_idx = None
     for i, p in enumerate(productos):
         uid = p["_uid"]
@@ -2531,6 +2521,22 @@ def _render_productos():
     if st.button("➕ Agregar producto"):
         productos.append(_nueva_fila_producto())
         st.rerun()
+
+    # Tabla resumen: antes iba arriba de todo, ahora al final — pedido
+    # explícito: "el resumen en lista de los productos debería estar debajo
+    # del panel para la carga del producto y el boton para agregar otro,
+    # justo antes del resumen de la operativa" (esa tarjeta se renderiza
+    # después de esta pestaña, así que quedando acá abajo es lo último que
+    # se ve antes de llegar a ella).
+    resumen = [{
+        "#": i + 1,
+        "Descripción": ("⚠️ " if (_f_local(p.get("fob_unit")) == 0 or _f_local(p.get("cantidad")) == 0) else "")
+            + (p.get("descripcion") or "(sin nombre)"),
+        "FOB Unit.": money(_f_local(p.get("fob_unit"))),
+        "Cantidad": f'{_f_local(p.get("cantidad")):,.2f}',
+        "FOB Total": money(_f_local(p.get("fob_unit")) * _f_local(p.get("cantidad"))),
+    } for i, p in enumerate(productos)]
+    _tabla_html(resumen, alinear_derecha=["#", "FOB Unit.", "Cantidad", "FOB Total"])
 
 
 def _render_cif(resultado):
@@ -2620,7 +2626,16 @@ def _render_gastos():
 
 
 def _render_simulacion_venta(resultado):
-    """Margen sugerido y PV final por producto, con el resultado de venta."""
+    """Costo, precio de venta en Arg (referencia de mercado) y precio de
+    venta estimado por producto, en USD y ARS, con el único % de margen que
+    importa acá: el real, entre el costo final unitario y el precio de
+    venta estimado. Pedido explícito del dueño de la app (mirado como
+    consultor de ventas/desarrollo comercial): antes había un "Margen (%)"
+    editable que solo servía para sugerir un precio (PV sugerido) — dos
+    números de margen a la vez (el deseado y el real) confundían más de lo
+    que ayudaban. Se saca ese campo y el PV sugerido de la UI; calculo.py
+    los sigue calculando igual (nadie tocó ese archivo, compatibilidad con
+    cotizaciones ya guardadas), simplemente ya no se muestran acá."""
     productos = st.session_state.cot_productos
     if not productos:
         st.caption("No hay productos cargados.")
@@ -2628,25 +2643,31 @@ def _render_simulacion_venta(resultado):
     for p, r in zip(productos, resultado["productos"]):
         uid = p["_uid"]
         with st.container(border=True, key=f"formrow_venta_{uid}"):
-            c0, c1, c2, c3, c4 = st.columns([2, 1, 1, 1, 1])
-            c0.markdown(f"**{p.get('descripcion') or '(sin nombre)'}**")
-            c0.caption(f"Costo c/IVA unit.: {money(r['costo_civa_unit'])}")
-            p["margen_pct"] = c1.number_input("Margen (%)", value=_f_local(p.get("margen_pct")), format="%.2f", key=f"pmargen_{uid}", help="Margen deseado sobre el costo, para calcular el PV sugerido")
-            p["pv_final_usd"] = c2.number_input("PV Final (USD)", value=_f_local(p.get("pv_final_usd")), format="%.2f", key=f"pvfin_{uid}", help="Precio de venta real — dejalo en 0 si todavía no lo definiste")
-            c3.metric("Margen real", pct(r["margen_real_pct"]))
-            # Informativo (referencia de precio de mercado/competencia): no
-            # entra en ningún cálculo de costo ni de margen.
-            p["pv_mercado_usd"] = c4.number_input("PV Mercado (USD)", value=_f_local(p.get("pv_mercado_usd")), format="%.2f", key=f"pvmerc_{uid}", help="Precio de referencia de mercado/competencia — informativo, no afecta ningún cálculo")
-            st.caption(f"PV sugerido: {money(r['pv_sugerido_usd'])} · Ganancia unit.: {money(r['ganancia_unit_usd'])} · Ganancia total: {money(r['ganancia_total_usd'])}")
+            st.markdown(f"**{p.get('descripcion') or '(sin nombre)'}**")
 
-            st.markdown("**Simulación (ARS)**")
-            a0, a1, a2, a3, a4 = st.columns([2, 1, 1, 1, 1])
-            a0.caption(f"Costo c/IVA unit.: {money(r['costo_civa_unit_ars'], 'ARS')}")
-            a1.metric("PV sugerido", money(r["pv_sugerido_ars"], "ARS"))
-            a2.metric("PV Final", money(r["pv_final_ars"], "ARS"))
-            a3.metric("Margen real", pct(r["margen_real_pct"]))
-            a4.metric("PV Mercado", money(r["pv_mercado_ars"], "ARS"))
-            st.caption(f"Ganancia unit.: {money(r['ganancia_unit_ars'], 'ARS')} · Ganancia total: {money(r['ganancia_total_ars'], 'ARS')}")
+            c1, c2, c3 = st.columns(3)
+            c1.metric("Costo del producto (USD)", money(r["costo_civa_unit"]))
+            c2.metric("Costo del producto (ARS)", money(r["costo_civa_unit_ars"], "ARS"))
+            c3.metric(
+                "% Margen", pct(r["margen_real_pct"]),
+                help="(Precio de venta estimado − Costo del producto) / Costo del producto",
+            )
+
+            d1, d2 = st.columns(2)
+            # Informativo (referencia de precio de mercado/competencia en
+            # Argentina): no entra en ningún cálculo de costo ni de margen.
+            p["pv_mercado_usd"] = d1.number_input(
+                "Precio de venta en Arg (USD)", value=_f_local(p.get("pv_mercado_usd")), format="%.2f",
+                key=f"pvmerc_{uid}", help="Precio de referencia de mercado/competencia en Argentina — informativo, no afecta ningún cálculo.",
+            )
+            d2.metric("Precio de venta en Arg (ARS)", money(r["pv_mercado_ars"], "ARS"))
+
+            e1, e2 = st.columns(2)
+            p["pv_final_usd"] = e1.number_input(
+                "Precio de venta estimado (USD)", value=_f_local(p.get("pv_final_usd")), format="%.2f",
+                key=f"pvfin_{uid}", help="Precio al que planeás vender este producto — dejalo en 0 si todavía no lo definiste.",
+            )
+            e2.metric("Precio de venta estimado (ARS)", money(r["pv_final_ars"], "ARS"))
 
 
 def _volver_a_historial():
@@ -2902,7 +2923,7 @@ def _render_cotizador_editor():
     # pedido explícito del dueño de la app, en USD.
     # ============================================================
     with st.container(border=True, key=f"resultgroup_resumentop_{cot_id}"):
-        st.markdown('<div class="sb-card-title">📊 Resumen de costeo</div>', unsafe_allow_html=True)
+        st.markdown('<div class="sb-card-title">📊 Resumen de la operativa</div>', unsafe_allow_html=True)
         r1, r2, r3 = st.columns(3)
         r1.metric("Costo FOB", money(resultado["fob_total_sum"]))
         r2.metric("Costo Final", money(resultado["total_c_iva_usd"]))
@@ -2956,7 +2977,15 @@ def _render_cotizador_editor():
             disabled=True, key=tarifafletecert_key, help="= Tarifa flete × % Certificación. Se usa en el CIF.",
         )
 
-        tf4, tf5, tf6 = st.columns(3)
+        # Gastos en origen y Seguro comparten la columna tf4: antes Seguro
+        # tenía su propia 3ra columna (selectbox + a veces el monto manual +
+        # el resultado automático, 2-3 campos apilados) y quedaba mucho más
+        # alta que "Gastos en origen"/"Gastos locales" (1 solo campo cada
+        # una), dejando un hueco vacío al lado. Pedido explícito: "el
+        # espacio para seguro podría estar debajo de gastos en origen, hay
+        # un espacio libre" — se apila Seguro debajo de Gastos en origen, en
+        # la misma columna, y la fila pasa de 3 a 2 columnas.
+        tf4, tf5 = st.columns(2)
         if contenedor in ("FOB", "FCA"):
             # No se cobran gastos en origen con estas dos condiciones (el
             # exportador ya los cubre hasta el puerto de origen) — forzado a
@@ -2983,18 +3012,19 @@ def _render_cotizador_editor():
         )
         if gastos_locales_hdr == 0:
             tf5.caption("⚠️ Sin cargar")
-        seguro_modo_ui = tf6.selectbox(
+
+        seguro_modo_ui = tf4.selectbox(
             "Seguro", list(SEGURO_MODO_UI_A_DB), key=segmodo_key,
             help="Automático: 0,3% s/FOB declarado con piso USD 75. No cobrar / Manual, a elección.",
         )
         seguro_modo = SEGURO_MODO_UI_A_DB.get(seguro_modo_ui, "auto")
         if seguro_modo == "manual":
-            seguro_manual_usd = tf6.number_input(
+            seguro_manual_usd = tf4.number_input(
                 "Seguro manual (USD)", value=seguro_manual_usd, format="%.2f", step=10.0, key=segmanual_key,
             )
         segurohdr_key = f"segurohdr_{cot_id}"
         st.session_state[segurohdr_key] = resultado["seguro_declarado"]
-        tf6.number_input(
+        tf4.number_input(
             "Seguro (USD)", value=resultado["seguro_declarado"], format="%.2f", disabled=True,
             key=segurohdr_key, help="= FOB total × Seguro (%) s/FOB, cargado en Datos generales.",
         )
@@ -3002,7 +3032,7 @@ def _render_cotizador_editor():
         # Gastos en origen y Flete no pagan IVA, no hace falta editarlo — Gastos
         # locales y Seguro sí, así que su % IVA (crédito fiscal recuperable) se
         # edita acá en vez de en Costos operativos, donde ya no aparecen.
-        _, tf8, tf9 = st.columns(3)
+        tf8, tf9 = st.columns(2)
         pct_iva_gastoslocales_input = tf8.number_input(
             "IVA Gastos locales (%)", value=pct_iva_gastoslocales_input, format="%.2f", step=1.0,
             key=pctivagastoslocales_key, help="% de IVA incluido en Gastos locales — crédito fiscal recuperable.",
@@ -3057,23 +3087,25 @@ def _render_cotizador_editor():
             e1.metric("IVA a recuperar", money(resultado["iva_a_recuperar"]))
             e2.metric("Percepciones a recuperar", money(resultado["percep_a_recuperar"]))
 
-        with st.expander("Ver costeo unitario por producto"):
-            rows = [{
-                "Producto": p.get("descripcion") or "-",
-                "Costo c/IVA Unit. (USD)": money(p["costo_civa_unit"]),
-                "Costo c/IVA Unit. (ARS)": money(p["costo_civa_unit_ars"], "ARS"),
-                "Costo s/IVA Unit. (USD)": money(p["costo_sviva_unit"]),
-                "Costo s/IVA Unit. (ARS)": money(p["costo_sviva_unit_ars"], "ARS"),
-            } for p in resultado["productos"]]
-            _tabla_html(rows, alinear_derecha=[
-                "Costo c/IVA Unit. (USD)", "Costo c/IVA Unit. (ARS)",
-                "Costo s/IVA Unit. (USD)", "Costo s/IVA Unit. (ARS)",
-            ])
-            check = resultado["check_diferencia"]
-            if abs(check) < 0.5:
-                st.success(f"✅ Check de consistencia OK (diferencia: {check:,.4f})")
-            else:
-                st.warning(f"⚠️ Diferencia de redondeo en el check: {money(check)}")
+        # Pedido explícito: sin desplegable — la información queda visible
+        # directamente (antes vivía adentro de un st.expander colapsado).
+        st.markdown("**Costeo unitario por producto**")
+        rows = [{
+            "Producto": p.get("descripcion") or "-",
+            "Costo c/IVA Unit. (USD)": money(p["costo_civa_unit"]),
+            "Costo c/IVA Unit. (ARS)": money(p["costo_civa_unit_ars"], "ARS"),
+            "Costo s/IVA Unit. (USD)": money(p["costo_sviva_unit"]),
+            "Costo s/IVA Unit. (ARS)": money(p["costo_sviva_unit_ars"], "ARS"),
+        } for p in resultado["productos"]]
+        _tabla_html(rows, alinear_derecha=[
+            "Costo c/IVA Unit. (USD)", "Costo c/IVA Unit. (ARS)",
+            "Costo s/IVA Unit. (USD)", "Costo s/IVA Unit. (ARS)",
+        ])
+        check = resultado["check_diferencia"]
+        if abs(check) < 0.5:
+            st.success(f"✅ Check de consistencia OK (diferencia: {check:,.4f})")
+        else:
+            st.warning(f"⚠️ Diferencia de redondeo en el check: {money(check)}")
 
     # ============================================================
     # Simulación de venta (antes 🔟 — todo lo que es venta, margen y
