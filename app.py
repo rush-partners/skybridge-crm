@@ -3044,13 +3044,14 @@ def _render_cotizador_editor():
         )
 
     # ============================================================
-    # Costos operativos (antes 8️⃣, + Arancel SIM que antes vivía en 7️⃣)
+    # Costos operativos (antes 8️⃣)
     # ============================================================
     with tab_costos_op:
-        arancel_sim = st.number_input(
-            "Arancel SIM (USD)", value=arancel_sim, step=1.0, key=arancel_key,
-            help="Costo fijo del Sistema Informático María (trámite aduanero), no depende del producto.",
-        )
+        # El Arancel SIM se sacó de acá: pedido explícito de Tom — "se paga
+        # en el VEP, no debe estar en los gastos operativos". Ya no se
+        # edita por cotización; sigue entrando al cálculo (total_tributos_
+        # vep_usd en calculo.py) con su valor prefetcheado más arriba
+        # (último guardado, o el default de USD 10 si nunca se cargó).
         _render_gastos()
 
     # ============================================================
