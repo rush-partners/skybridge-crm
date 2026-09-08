@@ -4529,13 +4529,26 @@ def _render_fila_contacto_crm(c, en_curso_por_cliente=None, resumen_cot_pipeline
         # con los íconos de c4 en ventanas angostas — verificado con captura
         # real a 1000/1280/1440px, claro y oscuro (ver íconos de 30px en
         # filacrmicons_ más abajo, mismo motivo).
-        c1, c2, c3, c4, c5 = st.columns([1.5, 1.0, 1.9, 1.6, 3.8], vertical_alignment="center")
+        # top, no center: con center, cada fila se centraba DENTRO de su
+        # propia altura — y esa altura varía según el nombre ocupe 1, 2 o 3
+        # líneas (+ Producto de interés, ver abajo), así que el chip de
+        # fecha/badge terminaba a una altura distinta en cada card, aunque
+        # esa misma fila se viera "centrada" mirándola sola. Con top, todas
+        # las columnas arrancan al mismo nivel (el padding de la card) sin
+        # importar cuánto ocupe el nombre — reportado por Tom, verificado
+        # con captura real antes/después.
+        c1, c2, c3, c4, c5 = st.columns([1.5, 1.0, 1.9, 1.6, 3.8], vertical_alignment="top")
 
+        lineas_c1 = [f'<div style="font-weight:700; font-size:14px;">{html.escape(c["nombre"])}</div>']
+        if c.get("producto_interes"):
+            lineas_c1.append(
+                f'<div style="font-size:12px; color:var(--sb-orange-dark);">'
+                f'🎯 {html.escape(c["producto_interes"])}</div>'
+            )
         subt = " · ".join(v for v in (c.get("empresa"), c.get("cuit")) if v)
-        linea_nombre = f'<div style="font-weight:700; font-size:14px;">{html.escape(c["nombre"])}</div>'
         if subt:
-            linea_nombre += f'<div style="font-size:12px; color:var(--sb-text-secondary);">{html.escape(subt)}</div>'
-        c1.markdown(linea_nombre, unsafe_allow_html=True)
+            lineas_c1.append(f'<div style="font-size:12px; color:var(--sb-text-secondary);">{html.escape(subt)}</div>')
+        c1.markdown("".join(lineas_c1), unsafe_allow_html=True)
 
         with c2:
             seguimiento_txt = _fmt_fecha(c.get("proximo_seguimiento"))
@@ -4606,8 +4619,12 @@ def _render_fila_contacto_crm(c, en_curso_por_cliente=None, resumen_cot_pipeline
                 n_en_curso = en_curso_por_cliente.get(c.get("cliente_id"), 0)
                 dias_act = _dias_desde_actividad(c)
                 actividad_txt = f"hace {dias_act} día(s)" if dias_act is not None else "sin actividad"
+                # Sin padding-top: era una compensación para cuando esta
+                # columna vivía en una fila vertical_alignment="center" —
+                # con "top" (ver arriba) ya arranca al mismo nivel que el
+                # resto de las columnas sin necesitar el empujón.
                 st.markdown(
-                    f'<div style="font-size:12px; color:var(--sb-text-secondary); line-height:1.6; padding-top:10px;">'
+                    f'<div style="font-size:12px; color:var(--sb-text-secondary); line-height:1.6;">'
                     f'📦 {n_en_curso} importación(es) en curso<br>🕓 última actividad {actividad_txt}</div>',
                     unsafe_allow_html=True,
                 )
