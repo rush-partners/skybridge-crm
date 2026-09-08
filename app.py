@@ -285,12 +285,25 @@ __SB_VARS__
         versión de Streamlit ya no usa [data-baseweb="tab"] (eso quedó
         muerto de una versión anterior) — el selector correcto es
         [data-testid="stTab"] con role="tab" / aria-selected. */
+        /* Con 6 pestañas (+ su ✅/⚠️ de estado) no siempre entran en una sola
+        fila — "flex-wrap: wrap" las mandaba a una 2da línea que además
+        quedaba tapada a medias por el botón sticky "Volver al listado" al
+        scrollear (se veía como una franja suelta, "de fondo", pedido de
+        Tom: "no crees que estan muy encimados a una linea que quedo de
+        fondo"). Nowrap + scroll horizontal (como las pestañas de un
+        browser): nunca rompe a una 2da línea, y se llega a las que no
+        entran scrolleando el propio renglón de pestañas, no la página. */
         [data-testid="stTabs"] [role="tablist"] {
-            display: flex; gap: 8px; flex-wrap: wrap; border-bottom: none !important;
-            margin-bottom: 16px;
+            display: flex; gap: 8px; flex-wrap: nowrap; border-bottom: none !important;
+            margin-bottom: 16px; overflow-x: auto; overflow-y: hidden;
+            scrollbar-width: thin; scrollbar-color: var(--sb-border) transparent;
+        }
+        [data-testid="stTabs"] [role="tablist"]::-webkit-scrollbar { height: 6px; }
+        [data-testid="stTabs"] [role="tablist"]::-webkit-scrollbar-thumb {
+            background: var(--sb-border); border-radius: 3px;
         }
         [data-testid="stTab"] {
-            flex: 1; min-width: 150px; justify-content: center;
+            flex: 1 1 auto; min-width: 130px; justify-content: center;
             background: var(--sb-surface) !important; border: 1px solid var(--sb-border) !important;
             border-radius: 10px !important; padding: 12px 10px !important;
             box-shadow: var(--sb-shadow-sm); transition: box-shadow 0.15s ease, border-color 0.15s ease;
@@ -3231,9 +3244,14 @@ def _render_cotizador_editor():
             st.session_state[gastosorigen_key] = 0.0
             tf_gastos.number_input(
                 "Gastos en origen (USD)", value=0.0, format="%.2f", disabled=True, key=gastosorigen_key,
-                help="Gastos EXW / en el país de origen (handling, documentación, etc.).",
+                help="No aplica con FOB/FCA — el exportador ya cubre los gastos hasta el puerto de origen.",
             )
-            tf_gastos.caption("No aplica con FOB/FCA — el exportador ya cubre los gastos hasta el puerto de origen.")
+            # Antes iba en un st.caption con el texto completo — a 2 líneas
+            # desalineaba la altura de esta columna contra "% Certificación"/
+            # "Seguro" (mismo motivo que el resto de los "⚠️ Sin cargar" de
+            # acá, que sí entran en 1 línea). La explicación completa sigue
+            # disponible en el "?" del campo de arriba.
+            tf_gastos.caption("No aplica (FOB/FCA)")
         else:
             gastos_origen = tf_gastos.number_input(
                 "Gastos en origen (USD)", value=gastos_origen, format="%.2f", step=10.0, key=gastosorigen_key,
@@ -3357,11 +3375,15 @@ def _render_cotizador_editor():
     with tab_simulacion:
         with st.container(border=True, key=f"resultgroup_venta_{cot_id}"):
             st.markdown('<div class="sb-card-title">📈 Resultado estimado de la venta</div>', unsafe_allow_html=True)
+            # 3 columnas en las 2 filas (antes la 2da fila usaba
+            # st.columns(2), así que "Ganancia bruta (ARS)" quedaba debajo
+            # de "% Rentabilidad" en vez de debajo de "Venta total estimada
+            # (ARS)" — pedido explícito de Tom: alinear ambas filas).
             v1, v2, v3 = st.columns(3)
             v1.metric("Venta total estimada", money(resultado["venta_total_usd"]))
             v2.metric("Venta total estimada (ARS)", money(resultado["venta_total_ars"], "ARS"))
             v3.metric("% Rentabilidad s/inversión", pct(resultado["rentabilidad_pct"]))
-            v4, v5 = st.columns(2)
+            v4, v5, v6 = st.columns(3)
             v4.metric("Ganancia bruta", money(resultado["ganancia_bruta_usd"]))
             v5.metric("Ganancia bruta (ARS)", money(resultado["ganancia_bruta_ars"], "ARS"))
 
