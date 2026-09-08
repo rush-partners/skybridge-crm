@@ -473,6 +473,32 @@ __SB_VARS__
             background: var(--sb-zone) !important; border-radius: 6px !important;
         }
 
+        /* Stepper del Cotizador: fila de 6 "pills" con el estado de cada
+        sección (del mockup aprobado) — puramente informativo, NO es una
+        navegación por pasos obligatoria: las secciones siguen siendo
+        acordeones libres, cualquiera se abre en el orden que sea. "Activa"
+        = esa sección tiene el expander abierto ahora mismo; "lista" = no le
+        falta ningún dato obligatorio (mismo chequeo ⚠️ que ya tiene cada
+        título de sección). */
+        .sb-stepper { display: flex; gap: 6px; margin-bottom: 18px; }
+        .sb-stepper-item {
+            flex: 1; text-align: center; padding: 10px 6px; border-radius: 8px;
+            background: var(--sb-surface); border: 1px solid var(--sb-border);
+            font-size: 11.5px; font-weight: 700; color: var(--sb-text-secondary);
+        }
+        .sb-stepper-item.active {
+            border-color: var(--sb-orange); color: var(--sb-orange-dark);
+            box-shadow: 0 2px 8px rgba(232, 101, 42, 0.15);
+        }
+        .sb-stepper-item.done { color: #22C55E; }
+        .sb-stepper-num {
+            display: inline-flex; align-items: center; justify-content: center;
+            width: 20px; height: 20px; border-radius: 50%; background: var(--sb-border);
+            color: var(--sb-navy); font-size: 11px; margin-bottom: 4px;
+        }
+        .sb-stepper-item.active .sb-stepper-num { background: var(--sb-orange); color: white; }
+        .sb-stepper-item.done .sb-stepper-num { background: #16A34A; color: white; }
+
         /* Títulos de sección: acento naranja con más contraste (orange-dark)
         sobre fondo claro, y una línea sutil que ordena la jerarquía visual. */
         .stApp h2, .stApp h3 {
@@ -1157,6 +1183,27 @@ def _badge(texto, color):
         f'border-radius:4px; font-size:11px; font-weight:700; text-transform:uppercase; '
         f'letter-spacing:0.03em; white-space:nowrap;">{html.escape(texto)}</span>'
     )
+
+
+def _render_stepper(estados):
+    """Fila de 6 'pills' con el estado de cada sección del Cotizador (ver
+    .sb-stepper en _inyectar_estilos) — componente del mockup aprobado.
+    Puramente informativo: no navega ni fuerza un orden, las secciones
+    siguen siendo acordeones libres. estados: lista de (etiqueta, estado)
+    con estado en {"done", ""} — sin "active": Streamlit no expone de forma
+    confiable qué expander está abierto ahora mismo sin arriesgar romper
+    el abrir/cerrar real de las secciones (ver nota en el call site)."""
+    items_html = []
+    for i, (etiqueta, estado) in enumerate(estados, start=1):
+        clase = f" {estado}" if estado else ""
+        contenido_num = "✓" if estado == "done" else str(i)
+        items_html.append(
+            f'<div class="sb-stepper-item{clase}">'
+            f'<div class="sb-stepper-num">{contenido_num}</div>'
+            f'<div>{html.escape(etiqueta)}</div>'
+            f'</div>'
+        )
+    st.markdown(f'<div class="sb-stepper">{"".join(items_html)}</div>', unsafe_allow_html=True)
 
 
 def _tabla_html(filas, alinear_derecha=None):
@@ -2652,10 +2699,39 @@ def _render_cotizador_editor():
 
     st.subheader(f"Cotización {cab['numero']}")
 
+    # Stepper informativo (mockup aprobado) — "lista" (✓ verde) se calcula
+    # con los mismos datos guardados que usa cada sección para su propio
+    # ⚠️, así que puede mostrarse ACÁ arriba, antes de que esas secciones
+    # se rendericen más abajo (no hace falta esperar al prefetch/resultado).
+    #
+    # NO marca la sección con el expander abierto ahora mismo ("activa"):
+    # Streamlit solo expone ese estado vía session_state si el expander
+    # tiene on_change="rerun", y probado acá eso hacía que "Agregar
+    # producto"/"Agregar gasto" (que ya hacen su propio st.rerun() manual)
+    # terminaran confundiendo qué sección quedaba abierta al recargar —
+    # se probó y se revirtió. Mejor un stepper simple y confiable que uno
+    # "completo" que a veces cierra la sección equivocada.
+    _productos_stepper = st.session_state.cot_productos
+    _gastos_stepper = st.session_state.cot_gastos
+    _productos_listos = bool(_productos_stepper) and not _mercaderia_tiene_ceros(_productos_stepper)
+    _render_stepper([
+        ("Datos generales", "done" if cab.get("cliente_id") else ""),
+        ("Productos", "done" if _productos_listos else ""),
+        ("Tarifas flete", "done" if (cab.get("tarifa_flete") and cab.get("gastos_locales_hdr")) else ""),
+        ("Costos operativos", "done" if (
+            _gastos_stepper and not _gastos_visibles_tiene_ceros(_gastos_stepper)
+        ) else ""),
+        ("Memoria de cálculo", "done" if _productos_listos else ""),
+        ("Simulación de venta", "done" if _productos_listos else ""),
+    ])
+
     # ============================================================
     # Datos generales de la cotización (antes 1️⃣)
     # ============================================================
-    with st.expander("Datos generales de la cotización", expanded=False, icon=":material/description:"):
+    with st.expander(
+        "Datos generales de la cotización", expanded=False,
+        icon=":material/description:", key=f"exp_datos_generales_{cot_id}",
+    ):
         # Las keys incluyen cot_id para que, al cambiar de cotización, Streamlit
         # trate cada widget como uno nuevo y tome los valores recién cargados en
         # lugar de conservar el valor tipeado para la cotización anterior.
@@ -2937,7 +3013,10 @@ def _render_cotizador_editor():
     # 6️⃣ Base imponible para IVA y 9️⃣ Resultado de la operación (costo puro
     # — sin venta ni margen, eso vive en "Simulación de venta").
     # ============================================================
-    with st.expander("Memoria de cálculo (auditoría — solo lectura)", expanded=False, icon=":material/calculate:"):
+    with st.expander(
+        "Memoria de cálculo (auditoría — solo lectura)", expanded=False,
+        icon=":material/calculate:", key=f"exp_memoria_{cot_id}",
+    ):
         st.markdown("**Valor CIF**")
         _render_cif(resultado)
 
@@ -2989,7 +3068,10 @@ def _render_cotizador_editor():
     # Simulación de venta (antes 🔟 — todo lo que es venta, margen y
     # ganancia estimada vive acá, no en "Memoria de cálculo")
     # ============================================================
-    with st.expander("Simulación de venta", expanded=False, icon=":material/trending_up:"):
+    with st.expander(
+        "Simulación de venta", expanded=False,
+        icon=":material/trending_up:", key=f"exp_simulacion_{cot_id}",
+    ):
         with st.container(border=True, key=f"resultgroup_venta_{cot_id}"):
             st.markdown('<div class="sb-card-title">📈 Resultado estimado de la venta</div>', unsafe_allow_html=True)
             v1, v2, v3 = st.columns(3)
