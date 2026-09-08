@@ -311,9 +311,15 @@ __SB_VARS__
         [data-testid="stTab"]:hover {
             box-shadow: var(--sb-shadow-lg); border-color: var(--sb-orange) !important;
         }
+        /* Una sola línea por pestaña (antes "normal" dejaba que las
+        etiquetas largas — "Tarifas flete y seguro", "Simulación de venta"
+        — envolvieran a 2 líneas mientras las cortas quedaban en 1: mismo
+        alto de fila pero contenido despareja, se veía irregular). El
+        scroll horizontal del tablist (ver arriba) es la red de contención
+        si alguna etiqueta no entra del todo en pantallas angostas. */
         [data-testid="stTab"] p {
             color: var(--sb-text-secondary) !important; font-weight: 700 !important;
-            font-size: 13px !important; white-space: normal !important; text-align: center;
+            font-size: 13px !important; white-space: nowrap !important; text-align: center;
         }
         [data-testid="stTab"][aria-selected="true"] {
             border-color: var(--sb-orange) !important;
