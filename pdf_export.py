@@ -160,6 +160,21 @@ def generar_pdf_cotizacion(cab: dict, resultado: dict, completo: bool = True) ->
     def _head(texto, alinear_derecha=True):
         return Paragraph(texto, head_style_r if alinear_derecha else head_style)
 
+    # Descripción/NCM como Paragraph (no texto plano): con texto plano
+    # reportlab no corta la celda cuando el contenido no entra en el ancho
+    # de columna, así que un nombre de producto largo quedaba superpuesto
+    # con las columnas vecinas (bug reportado por Tom en la cotización
+    # 0013). Con Paragraph el texto ajusta a 2+ líneas dentro de su propia
+    # columna y la fila simplemente crece de alto — se ve el nombre
+    # completo, sin invadir FOB Unit./Cant./etc.
+    cell_style = ParagraphStyle(
+        "Cell", parent=styles["Normal"], fontName="Helvetica",
+        fontSize=8, textColor=NAVY, leading=10,
+    )
+
+    def _celda(texto):
+        return Paragraph(str(texto), cell_style)
+
     prod_rows = [[
         _head("Descripción", False), _head("NCM", False), _head("FOB Unit."), _head("Cant."),
         _head("FOB Total"), _head("Costo c/IVA U. USD"), _head("Costo c/IVA U. ARS"),
@@ -168,7 +183,11 @@ def generar_pdf_cotizacion(cab: dict, resultado: dict, completo: bool = True) ->
         if not p.get("descripcion") and p["cantidad"] == 0:
             continue
         prod_rows.append([
-            p.get("descripcion") or "-", p.get("ncm") or "-",
+            # Solo Descripción va en Paragraph: es la que puede ser larga y
+            # se superponía. El NCM es un código corto de formato fijo
+            # (nunca fue el problema reportado) — se deja como texto plano
+            # para que no se corte en un punto intermedio del código.
+            _celda(p.get("descripcion") or "-"), p.get("ncm") or "-",
             f"{p['fob_unit']:,.2f}", f"{p['cantidad']:,.2f}", f"{p['fob_total']:,.2f}",
             f"{p['costo_civa_unit']:,.2f}", f"{p['costo_civa_unit_ars']:,.2f}",
         ])
@@ -180,6 +199,10 @@ def generar_pdf_cotizacion(cab: dict, resultado: dict, completo: bool = True) ->
         ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
         ("FONTSIZE", (0, 1), (-1, -1), 8),
         ("VALIGN", (0, 0), (-1, 0), "BOTTOM"),
+        # Top, no Middle: con Descripción/NCM ahora en Paragraph (ajustan a
+        # varias líneas si el nombre es largo), filas de distinto alto se
+        # ven mejor con todo arrancando arriba en vez de centrado.
+        ("VALIGN", (0, 1), (-1, -1), "TOP"),
         ("TEXTCOLOR", (0, 0), (-1, 0), TEXT_SECONDARY),
         ("TEXTCOLOR", (0, 1), (-1, -1), NAVY),
         ("LINEBELOW", (0, 0), (-1, 0), 0.75, BORDER),

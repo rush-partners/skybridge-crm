@@ -2888,38 +2888,64 @@ def _render_productos():
         productos.append(_nueva_fila_producto())
 
     borrar_idx = None
+    duplicar_idx = None
     for i, p in enumerate(productos):
         uid = p["_uid"]
-        with st.container(border=True, key=f"formrow_producto_{uid}"):
-            c0, c1, c2, c3 = st.columns([3, 2, 1.3, 1.3])
-            p["descripcion"] = c0.text_input("Descripción", value=p.get("descripcion", ""), key=f"pdesc_{uid}")
-            p["ncm"] = c1.text_input("NCM", value=p.get("ncm", ""), key=f"pncm_{uid}")
-            p["fob_unit"] = c2.number_input("FOB Unit. (USD)", value=_f_local(p.get("fob_unit")), format="%.2f", key=f"pfob_{uid}")
-            p["cantidad"] = c3.number_input("Cantidad", value=_f_local(p.get("cantidad")), format="%.2f", key=f"pcant_{uid}")
-            if p["fob_unit"] == 0 or p["cantidad"] == 0:
-                st.caption("⚠️ Falta cargar FOB Unit. y/o Cantidad — este producto no suma costo todavía.")
+        # Cada producto colapsado en un desplegable — pedido explícito de
+        # Tom: "necesito ocultar con desplegables cada producto, sino cuando
+        # son muchos productos se hace un listado interminable". Mismo
+        # patrón que ya usa Gastos (⚠️ en el título si falta cargar algo,
+        # key fija con el uid para que no se cierre solo en pleno tipeo).
+        incompleto = _f_local(p.get("fob_unit")) == 0 or _f_local(p.get("cantidad")) == 0
+        titulo = p.get("descripcion") or f"Producto {i + 1} (sin nombre)"
+        if incompleto:
+            titulo = f"⚠️ {titulo} — falta FOB Unit. y/o Cantidad"
+        with st.expander(f"{i + 1}. {titulo}", expanded=False, key=f"exp_producto_{uid}"):
+            with st.container(border=True, key=f"formrow_producto_{uid}"):
+                c0, c1, c2, c3 = st.columns([3, 2, 1.3, 1.3])
+                p["descripcion"] = c0.text_input("Descripción", value=p.get("descripcion", ""), key=f"pdesc_{uid}")
+                p["ncm"] = c1.text_input("NCM", value=p.get("ncm", ""), key=f"pncm_{uid}")
+                p["fob_unit"] = c2.number_input("FOB Unit. (USD)", value=_f_local(p.get("fob_unit")), format="%g", key=f"pfob_{uid}")
+                p["cantidad"] = c3.number_input("Cantidad", value=_f_local(p.get("cantidad")), format="%g", key=f"pcant_{uid}")
+                if p["fob_unit"] == 0 or p["cantidad"] == 0:
+                    st.caption("⚠️ Falta cargar FOB Unit. y/o Cantidad — este producto no suma costo todavía.")
 
-            c4, c5, c6, c7 = st.columns([1.6, 1, 1, 1.1])
-            p["fob_decl_unit"] = c4.number_input("FOB Declarado Unit. (USD)", value=_f_local(p.get("fob_decl_unit")), format="%.2f", key=f"pfobd_{uid}", help="Si es distinto al FOB real de compra")
-            p["peso_kg"] = c5.number_input("Peso (kg)", value=_f_local(p.get("peso_kg")), format="%.2f", key=f"ppesokg_{uid}")
-            p["volumen_m3"] = c6.number_input("Volumen (m³)", value=_f_local(p.get("volumen_m3")), format="%.2f", key=f"pvolm3_{uid}")
-            c7.write("")
-            c7.write("")
-            if c7.button("🗑️ Eliminar", key=f"pdel_{uid}", use_container_width=True):
-                borrar_idx = i
+                c4, c5, c6, c7 = st.columns([1.6, 1, 1, 1.6])
+                p["fob_decl_unit"] = c4.number_input("FOB Declarado Unit. (USD)", value=_f_local(p.get("fob_decl_unit")), format="%g", key=f"pfobd_{uid}", help="Si es distinto al FOB real de compra")
+                p["peso_kg"] = c5.number_input("Peso (kg)", value=_f_local(p.get("peso_kg")), format="%g", key=f"ppesokg_{uid}")
+                p["volumen_m3"] = c6.number_input("Volumen (m³)", value=_f_local(p.get("volumen_m3")), format="%g", key=f"pvolm3_{uid}")
+                c7.write("")
+                c7a, c7b = c7.columns(2)
+                # Duplicar — pedido explícito de Tom: "hay veces que el
+                # producto paga lo mismo y tiene la misma ncm y solo tenemos
+                # una variante de color a declarar". Clona TODOS los campos
+                # ya cargados a una fila nueva (sin "id" -> se guarda como
+                # producto nuevo al guardar la cotización) con su propio
+                # _uid, insertada justo después del original.
+                if c7a.button("📋 Duplicar", key=f"pdup_{uid}", use_container_width=True):
+                    duplicar_idx = i
+                if c7b.button("🗑️ Eliminar", key=f"pdel_{uid}", use_container_width=True):
+                    borrar_idx = i
 
-            st.markdown("**Derechos e impuestos**")
-            st.caption("Dependen del NCM de cada producto — verificá en el nomenclador vigente.")
-            d1, d2, d3, d4 = st.columns(4)
-            p["pct_derechos"] = d1.number_input("Derechos (%)", value=_f_local(p.get("pct_derechos")), format="%.2f", key=f"pder_{uid}")
-            p["pct_tasa_estadistica"] = d2.number_input("Tasa Estad. (%)", value=_f_local(p.get("pct_tasa_estadistica")), format="%.2f", key=f"ptasa_{uid}")
-            p["pct_antidumping"] = d3.number_input("Antidump. (%)", value=_f_local(p.get("pct_antidumping")), format="%.2f", key=f"panti_{uid}")
-            p["pct_iva"] = d4.number_input("IVA (%)", value=_f_local(p.get("pct_iva")), format="%.2f", key=f"piva_{uid}")
+                st.markdown("**Derechos e impuestos**")
+                st.caption("Dependen del NCM de cada producto — verificá en el nomenclador vigente.")
+                d1, d2, d3, d4 = st.columns(4)
+                p["pct_derechos"] = d1.number_input("Derechos (%)", value=_f_local(p.get("pct_derechos")), format="%g", key=f"pder_{uid}")
+                p["pct_tasa_estadistica"] = d2.number_input("Tasa Estad. (%)", value=_f_local(p.get("pct_tasa_estadistica")), format="%g", key=f"ptasa_{uid}")
+                p["pct_antidumping"] = d3.number_input("Antidump. (%)", value=_f_local(p.get("pct_antidumping")), format="%g", key=f"panti_{uid}")
+                p["pct_iva"] = d4.number_input("IVA (%)", value=_f_local(p.get("pct_iva")), format="%g", key=f"piva_{uid}")
 
-            e1, e2, e3 = st.columns(3)
-            p["pct_iva_adicional"] = e1.number_input("IVA Adic. (%)", value=_f_local(p.get("pct_iva_adicional")), format="%.2f", key=f"pivaad_{uid}")
-            p["pct_ganancias"] = e2.number_input("Ganancias (%)", value=_f_local(p.get("pct_ganancias")), format="%.2f", key=f"pgcia_{uid}")
-            p["pct_iibb"] = e3.number_input("IIBB (%)", value=_f_local(p.get("pct_iibb")), format="%.2f", key=f"piibb_{uid}")
+                e1, e2, e3 = st.columns(3)
+                p["pct_iva_adicional"] = e1.number_input("IVA Adic. (%)", value=_f_local(p.get("pct_iva_adicional")), format="%g", key=f"pivaad_{uid}")
+                p["pct_ganancias"] = e2.number_input("Ganancias (%)", value=_f_local(p.get("pct_ganancias")), format="%g", key=f"pgcia_{uid}")
+                p["pct_iibb"] = e3.number_input("IIBB (%)", value=_f_local(p.get("pct_iibb")), format="%g", key=f"piibb_{uid}")
+
+    if duplicar_idx is not None:
+        copia = dict(productos[duplicar_idx])
+        copia.pop("id", None)
+        copia["_uid"] = uuid.uuid4().hex[:8]
+        productos.insert(duplicar_idx + 1, copia)
+        st.rerun()
 
     if borrar_idx is not None:
         productos.pop(borrar_idx)
@@ -3013,12 +3039,12 @@ def _render_gastos():
             c1, c2, c3 = st.columns(3)
             g["concepto"] = c1.text_input("Concepto", value=g.get("concepto", ""), key=f"gcon_{uid}")
             g["moneda"] = c2.selectbox("Moneda", MONEDAS, index=MONEDAS.index(g.get("moneda") or "USD"), key=f"gmon_{uid}")
-            g["monto"] = c3.number_input("Monto (s/IVA propio)", value=_f_local(g.get("monto")), format="%.2f", key=f"gmonto_{uid}")
+            g["monto"] = c3.number_input("Monto (s/IVA propio)", value=_f_local(g.get("monto")), format="%g", key=f"gmonto_{uid}")
 
             c4, c5, c6 = st.columns(3)
             g["prorrateo"] = c4.selectbox("Prorrateo", PRORRATEOS, index=PRORRATEOS.index(g.get("prorrateo") or "FOB"), key=f"gpror_{uid}", help="FOB: se reparte según el valor de cada producto. PESO: según su peso/volumen.")
             g["iva_incluido"] = c5.selectbox("IVA incluido en el monto", SI_NO, index=SI_NO.index(g.get("iva_incluido") or "NO"), key=f"gincl_{uid}")
-            g["pct_iva"] = c6.number_input("IVA (%)", value=_f_local(g.get("pct_iva")), format="%.2f", key=f"gpctiva_{uid}", help="% de IVA que ya viene incluido en este gasto — se usa como crédito fiscal recuperable.")
+            g["pct_iva"] = c6.number_input("IVA (%)", value=_f_local(g.get("pct_iva")), format="%g", key=f"gpctiva_{uid}", help="% de IVA que ya viene incluido en este gasto — se usa como crédito fiscal recuperable.")
 
             if st.button("🗑️ Eliminar gasto", key=f"gdel_{uid}"):
                 borrar_idx = i
@@ -3052,7 +3078,7 @@ def _campo_precio_venta(col, prefijo, p, campo_usd, uid, tc_venta, titulo, subti
     )
     valor_actual = _f_local(st.session_state[val_key]) if val_key in st.session_state else _f_local(p.get(campo_usd))
     valor = col.number_input(
-        f"Precio ({moneda})", value=valor_actual, format="%.2f",
+        f"Precio ({moneda})", value=valor_actual, format="%g",
         key=val_key, help=help_txt, label_visibility="collapsed",
     )
     if moneda == "USD":
@@ -3378,12 +3404,12 @@ def _render_cotizador_editor():
             cf_pct_input = c10.number_input(
                 "Costo financiero (%) s/FOB",
                 value=_cab_live.get("cf_pct_input", float(cab.get("costo_financiero_pct") or 0.025) * 100),
-                format="%.2f", step=0.1, key=f"cfpct_{cot_id}", help="Ej: escribí 2.5 para 2,5%",
+                format="%g", step=0.1, key=f"cfpct_{cot_id}", help="Ej: escribí 2.5 para 2,5%",
             )
             seguro_pct_input = c11.number_input(
                 "Seguro (%) s/FOB",
                 value=_cab_live.get("seguro_pct_input", float(cab.get("seguro_pct") or 0.003) * 100),
-                format="%.2f", step=0.05, key=f"segpct_{cot_id}", help="Ej: escribí 0.3 para 0,3%",
+                format="%g", step=0.05, key=f"segpct_{cot_id}", help="Ej: escribí 0.3 para 0,3%",
             )
             cf_pct = cf_pct_input / 100
             seguro_pct = seguro_pct_input / 100
@@ -3516,7 +3542,7 @@ def _render_cotizador_editor():
 
         # --- Fila 1 ---
         tarifa_flete = r1c1.number_input(
-            "Tarifa flete (USD)", value=tarifa_flete, format="%.2f", step=10.0, key=tarifaflete_key,
+            "Tarifa flete (USD)", value=tarifa_flete, format="%g", step=10.0, key=tarifaflete_key,
             help="Costo total del flete pagado al forwarder/naviera.",
         )
         if contenedor in ("FOB", "FCA"):
@@ -3529,12 +3555,12 @@ def _render_cotizador_editor():
             gastos_origen = 0.0
             st.session_state[gastosorigen_key] = 0.0
             r1c2.number_input(
-                "Gastos en origen (USD)", value=0.0, format="%.2f", disabled=True, key=gastosorigen_key,
+                "Gastos en origen (USD)", value=0.0, format="%g", disabled=True, key=gastosorigen_key,
                 help="No aplica con FOB/FCA — el exportador ya cubre los gastos hasta el puerto de origen.",
             )
         else:
             gastos_origen = r1c2.number_input(
-                "Gastos en origen (USD)", value=gastos_origen, format="%.2f", step=10.0, key=gastosorigen_key,
+                "Gastos en origen (USD)", value=gastos_origen, format="%g", step=10.0, key=gastosorigen_key,
                 help="Gastos EXW / en el país de origen (handling, documentación, etc.).",
             )
         seguro_modo_ui = r1c3.selectbox(
@@ -3554,23 +3580,23 @@ def _render_cotizador_editor():
             r2c2.caption("⚠️ Sin cargar")
         if seguro_modo == "manual":
             seguro_manual_usd = r2c3.number_input(
-                "Seguro manual (USD)", value=seguro_manual_usd, format="%.2f", step=10.0, key=segmanual_key,
+                "Seguro manual (USD)", value=seguro_manual_usd, format="%g", step=10.0, key=segmanual_key,
             )
 
         # --- Fila 3 ---
         pct_certificacion_input = r3c1.number_input(
-            "% Certificación", value=pct_certificacion_input, format="%.2f", min_value=0.0, max_value=100.0,
+            "% Certificación", value=pct_certificacion_input, format="%g", min_value=0.0, max_value=100.0,
             step=5.0, key=pctcert_key, help="Porción del flete certificada por la naviera para declarar en el CIF.",
         )
         pct_certificacion = pct_certificacion_input / 100
         gastos_locales_hdr = r3c2.number_input(
-            "Gastos locales (USD)", value=gastos_locales_hdr, format="%.2f", step=10.0, key=gastoslocaleshdr_key,
+            "Gastos locales (USD)", value=gastos_locales_hdr, format="%g", step=10.0, key=gastoslocaleshdr_key,
             help="Gastos locales en Argentina asociados al despacho.",
         )
         segurohdr_key = f"segurohdr_{cot_id}"
         st.session_state[segurohdr_key] = resultado["seguro_declarado"]
         r3c3.number_input(
-            "Seguro (USD)", value=resultado["seguro_declarado"], format="%.2f", disabled=True,
+            "Seguro (USD)", value=resultado["seguro_declarado"], format="%g", disabled=True,
             key=segurohdr_key, help="= FOB total × Seguro (%) s/FOB, cargado en Datos generales.",
         )
 
@@ -3581,7 +3607,7 @@ def _render_cotizador_editor():
         if gastos_locales_hdr == 0:
             r4c2.caption("⚠️ Sin cargar")
         pct_iva_seguro_input = r4c3.number_input(
-            "IVA Seguro (%)", value=pct_iva_seguro_input, format="%.2f", step=1.0,
+            "IVA Seguro (%)", value=pct_iva_seguro_input, format="%g", step=1.0,
             key=pctivaseguro_key, help="% de IVA incluido en el Seguro — crédito fiscal recuperable.",
         )
 
@@ -3592,14 +3618,14 @@ def _render_cotizador_editor():
         tarifafletecert_key = f"tarifafletecert_{cot_id}"
         st.session_state[tarifafletecert_key] = tarifa_flete * pct_certificacion
         r5c1.number_input(
-            "Tarifa flete certificado (USD)", value=tarifa_flete * pct_certificacion, format="%.2f",
+            "Tarifa flete certificado (USD)", value=tarifa_flete * pct_certificacion, format="%g",
             disabled=True, key=tarifafletecert_key, help="= Tarifa flete × % Certificación. Se usa en el CIF.",
         )
         # Gastos en origen no paga IVA, no hace falta editarlo — Gastos
         # locales sí, así que su % IVA (crédito fiscal recuperable) cierra
         # esta columna, junto a los montos que le dan origen.
         pct_iva_gastoslocales_input = r5c2.number_input(
-            "IVA Gastos locales (%)", value=pct_iva_gastoslocales_input, format="%.2f", step=1.0,
+            "IVA Gastos locales (%)", value=pct_iva_gastoslocales_input, format="%g", step=1.0,
             key=pctivagastoslocales_key, help="% de IVA incluido en Gastos locales — crédito fiscal recuperable.",
         )
 
