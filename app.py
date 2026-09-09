@@ -1289,6 +1289,49 @@ def _badge(texto, color):
     )
 
 
+def _render_stat_cards(stats):
+    """Fila de cards de métrica (Panel de Control): reemplaza los st.metric
+    sueltos — antes el único texto "flotando" sin card de toda la página,
+    mientras el resto usa el mismo lenguaje de card con acento de color a
+    la izquierda (cardwrap_/clientecard_/filacrm_/zona_). Usada tanto por
+    Cotizaciones como por Importaciones para que ambas pestañas del panel
+    compartan el mismo tratamiento. stats: lista de (icono, label, valor,
+    color) — el color va comentado en el sitio donde se arma la lista,
+    explicando de dónde sale (para que no quede como un color inventado)."""
+    cols = st.columns(len(stats))
+    for col, (icono, label, valor, color) in zip(cols, stats):
+        col.markdown(
+            f'<div style="background:var(--sb-surface); border:1px solid var(--sb-border); '
+            f'border-left:3px solid {color}; border-radius:8px; box-shadow:var(--sb-shadow); '
+            f'padding:14px 16px;">'
+            f'<div style="font-size:11px; font-weight:700; text-transform:uppercase; '
+            f'letter-spacing:0.05em; color:var(--sb-text-secondary); margin-bottom:6px; '
+            f'white-space:nowrap;">{icono} {html.escape(label)}</div>'
+            f'<div style="font-size:1.7rem; font-weight:800; color:var(--sb-navy); '
+            f'line-height:1.2;">{valor}</div>'
+            f'</div>',
+            unsafe_allow_html=True,
+        )
+
+
+def _zona_header_html(estado, cantidad, sufijo):
+    """Encabezado de una columna del kanban del Panel de Control (título del
+    estado + contador). El título va en un bloque con min-height fijo
+    (~2 líneas a este tamaño) y alineado abajo (align-items: flex-end): así,
+    una etiqueta larga que rompe a 2 líneas (ej. "En puerto/Dep.Fiscal", la
+    más larga de ESTADOS_IMPORTACION) ocupa el mismo alto que una de 1 línea
+    en vez de "empujar" el contador y las cards de esa columna más abajo que
+    las columnas vecinas — la fila entera queda siempre a la misma altura,
+    en vez del salto desparejo entre columnas que reportó Tom."""
+    return (
+        f'<div style="font-weight:700; font-size:15px; color:var(--sb-navy); '
+        f'min-height:38px; line-height:1.25; display:flex; align-items:flex-end; '
+        f'margin-bottom:2px;">{html.escape(estado)}</div>'
+        f'<div style="font-size:12px; color:var(--sb-text-secondary); margin-bottom:10px;">'
+        f'{cantidad} {sufijo}</div>'
+    )
+
+
 def _tabla_html(filas, alinear_derecha=None):
     """Tabla de solo lectura en HTML propio (clase .sb-table, ver
     _inyectar_estilos) en vez de st.dataframe — para las tablas de resumen
@@ -3710,26 +3753,12 @@ def _render_panel_cotizaciones():
     # cards de abajo, así que el color no es decorativo: es el mismo
     # código que el resto de la página ya usa para "Aprobada"/"Enviada"/
     # "Rechazada".
-    stats = [
+    _render_stat_cards([
         ("🧮", "Cotizaciones realizadas", len(cots_todas), "#E8652A"),
         ("✅", "Aprobadas", len(aprobadas), COLOR_ESTADO_COTIZACION["Aprobada"]),
         ("⏳", "Sin respuesta", len(sin_respuesta), COLOR_ESTADO_COTIZACION["Enviada"]),
         ("❌", "Rechazadas", len(rechazadas), COLOR_ESTADO_COTIZACION["Rechazada"]),
-    ]
-    cols_stats = st.columns(4)
-    for col, (icono, label, valor, color) in zip(cols_stats, stats):
-        col.markdown(
-            f'<div style="background:var(--sb-surface); border:1px solid var(--sb-border); '
-            f'border-left:3px solid {color}; border-radius:8px; box-shadow:var(--sb-shadow); '
-            f'padding:14px 16px;">'
-            f'<div style="font-size:11px; font-weight:700; text-transform:uppercase; '
-            f'letter-spacing:0.05em; color:var(--sb-text-secondary); margin-bottom:6px; '
-            f'white-space:nowrap;">{icono} {label}</div>'
-            f'<div style="font-size:1.7rem; font-weight:800; color:var(--sb-navy); '
-            f'line-height:1.2;">{valor}</div>'
-            f'</div>',
-            unsafe_allow_html=True,
-        )
+    ])
 
     st.markdown("#### Seguimiento por estado")
     clientes_con_cot = sorted({c["cliente_nombre"] for c in cots_todas if c.get("cliente_nombre")})
@@ -3756,8 +3785,7 @@ def _render_panel_cotizaciones():
     for col, estado in zip(cols, ESTADOS):
         with col, st.container(border=True, key=f"zona_cot_{estado}"):
             items = [c for c in cots if (c.get("estado") or "Borrador") == estado]
-            st.markdown(f"**{estado}**")
-            st.caption(f"{len(items)} cotización(es)")
+            st.markdown(_zona_header_html(estado, len(items), "cotización(es)"), unsafe_allow_html=True)
             for c in items[:LIMITE_TARJETAS_POR_COLUMNA]:
                 with st.container(border=True, key=f"cardwrap_cot_{c['id']}"):
                     st.markdown(
@@ -3812,10 +3840,17 @@ def _render_panel_importaciones():
     # coordinación, En tránsito, En puerto/Dep.Fiscal) — todas menos Entregada.
     en_proceso = [i for i in imps_todas if (i.get("estado") or ESTADOS_IMPORTACION[0]) != "Entregada"]
     completadas = [i for i in imps_todas if (i.get("estado") or ESTADOS_IMPORTACION[0]) == "Entregada"]
-    m1, m2, m3 = st.columns(3)
-    m1.metric("Importaciones totales", len(imps_todas))
-    m2.metric("En proceso", len(en_proceso))
-    m3.metric("Completadas", len(completadas))
+    # Mismo tratamiento que la fila de stats de Cotizaciones (_render_stat_cards,
+    # ver más abajo): naranja de marca para el total, "En tránsito" para el
+    # agregado "en proceso" (representa el grueso del recorrido activo) y
+    # "Entregada" para completadas — ambos ya definidos en
+    # COLOR_ESTADO_IMPORTACION y usados por _badge_estado_importacion en las
+    # cards de abajo, así que el color es el mismo código, no uno inventado.
+    _render_stat_cards([
+        ("📦", "Importaciones totales", len(imps_todas), "#E8652A"),
+        ("🚚", "En proceso", len(en_proceso), COLOR_ESTADO_IMPORTACION["En tránsito"]),
+        ("✅", "Completadas", len(completadas), COLOR_ESTADO_IMPORTACION["Entregada"]),
+    ])
 
     st.markdown("#### Seguimiento por estado")
     clientes_con_imp = sorted({i["cliente_nombre"] for i in imps_todas if i.get("cliente_nombre")})
@@ -3873,8 +3908,7 @@ def _render_panel_importaciones():
     for col, estado in zip(cols, estados_visibles):
         with col, st.container(border=True, key=f"zona_imp_{estado}"):
             items = [i for i in imps if (i.get("estado") or ESTADOS_IMPORTACION[0]) == estado]
-            st.markdown(f"**{estado}**")
-            st.caption(f"{len(items)} importación(es)")
+            st.markdown(_zona_header_html(estado, len(items), "importación(es)"), unsafe_allow_html=True)
             for imp in items[:LIMITE_TARJETAS_POR_COLUMNA]:
                 with st.container(border=True, key=f"cardwrap_imp_{imp['id']}"):
                     icono = ICONO_TIPO_ENVIO.get(imp.get("tipo_envio"), "")
