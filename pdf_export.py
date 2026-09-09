@@ -33,6 +33,17 @@ def _money(v, symbol="USD"):
         return f"{symbol} 0.00"
 
 
+def _num(v):
+    """Igual que _f_local de app.py: cotizaciones guardadas antes de que
+    existiera peso_kg/volumen_m3 (o gastos importados) pueden traer None."""
+    try:
+        if v is None or v == "":
+            return 0.0
+        return float(v)
+    except (TypeError, ValueError):
+        return 0.0
+
+
 def _fmt_fecha(valor):
     if not valor:
         return "-"
@@ -80,9 +91,30 @@ def generar_pdf_cotizacion(cab: dict, resultado: dict, completo: bool = True) ->
         '<br/><font color="#64748B" size="7.5">PRESUPUESTO DE IMPORTACIÓN</font>',
         normal,
     )
+
+    # M³/Kg totales de la carga + Formato de envío (LCL/FCL) — pedido
+    # explícito de Tom, en el sector superior derecho junto a Cotización N°/
+    # fecha, cada uno con su propio título (mismo patrón chico gris + valor
+    # en negro que el resto del PDF). Los totales salen de sumar
+    # peso_kg/volumen_m3 de cada producto (ya vienen así en resultado, sin
+    # tocar calculo.py). Formato solo se imprime con envío marítimo Y un
+    # valor cargado — en aéreo, o si no se cargó, esa línea directamente no
+    # aparece (pedido explícito: "en aereo debe quedar vacío").
+    peso_total_kg = sum(_num(p.get("peso_kg")) for p in resultado["productos"])
+    volumen_total_m3 = sum(_num(p.get("volumen_m3")) for p in resultado["productos"])
+    formato_envio = cab.get("formato_envio")
+    # "M3" en vez de "M³": el glyph de "³" (superíndice) no está en la
+    # fuente base de reportlab/Helvetica y se imprimía en blanco — se ve en
+    # la app (navegador) pero no acá.
+    stats_extra = f'<font color="#64748B" size="7">M3 TOTALES </font><font color="#0F172A" size="7"><b>{volumen_total_m3:,.2f}</b></font>'
+    stats_extra += f'<br/><font color="#64748B" size="7">KG TOTALES </font><font color="#0F172A" size="7"><b>{peso_total_kg:,.2f}</b></font>'
+    if cab.get("etd_eta") == "Marítimo" and formato_envio:
+        stats_extra += f'<br/><font color="#64748B" size="7">FORMATO </font><font color="#0F172A" size="7"><b>{_xml_escape(str(formato_envio))}</b></font>'
+
     meta = Paragraph(
         f'<font color="#0F172A"><b>Cotización {_xml_escape(str(cab.get("numero") or "-"))}</b></font>'
-        f'<br/><font color="#64748B" size="8">{datetime.now().strftime("%d/%m/%Y")}</font>',
+        f'<br/><font color="#64748B" size="8">{datetime.now().strftime("%d/%m/%Y")}</font>'
+        f'<br/><br/>{stats_extra}',
         meta_right,
     )
     header_tbl = Table([[wordmark, meta]], colWidths=[content_width * 0.6, content_width * 0.4])

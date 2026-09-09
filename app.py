@@ -2674,6 +2674,10 @@ def vista_clientes():
 # ---------------------------------------------------------------- COTIZADOR
 COT_CONDICIONES_VENTA = ["FOB", "EXW", "FCA"]
 COT_TIPOS_ENVIO = ["Marítimo", "Aéreo"]
+# Formato de envío (LCL/FCL) — pedido explícito de Tom: mostrarlo en el PDF
+# de la cotización, junto a m³ y kg totales. Solo aplica con envío marítimo
+# ("en aéreo debe quedar vacío"), así que el campo ni se muestra con Aéreo.
+FORMATOS_ENVIO_COT_MARITIMO = ["LCL", "FCL20", "FCL40"]
 
 # Seguro: 3 modos elegibles desde el editor (Cambio confirmado por el dueño
 # tras la auditoría contra el Excel) — la fórmula automática (0,3% s/FOB
@@ -3376,7 +3380,7 @@ def _render_cotizador_editor():
             estado = c2.selectbox("Estado", ESTADOS, index=ESTADOS.index(cab.get("estado") or "Borrador"), key=f"estado_{cot_id}")
             detalle_pedido = c3.text_input("Detalle pedido", value=cab.get("detalle_pedido") or "", key=f"detalle_{cot_id}")
 
-            c4, c5, c6 = st.columns(3)
+            c4, c5, c6, c6b = st.columns(4)
             origen = c4.text_input("Origen", value=cab.get("origen_cond_venta") or "", key=f"origen_{cot_id}")
             contenedor = c5.selectbox(
                 "Condición de venta", COT_CONDICIONES_VENTA,
@@ -3388,6 +3392,24 @@ def _render_cotizador_editor():
                 index=COT_TIPOS_ENVIO.index(cab.get("etd_eta")) if cab.get("etd_eta") in COT_TIPOS_ENVIO else 0,
                 key=f"etdeta_{cot_id}",
             )
+            # LCL/FCL — solo tiene sentido con envío marítimo. La key incluye
+            # etd_eta (mismo motivo que el "Formato" de Importaciones): si se
+            # cambia el tipo de envío, el desplegable nace de nuevo con las
+            # opciones correctas en vez de arrastrar un valor de aéreo/marítimo
+            # que ya no aplica.
+            if etd_eta == "Marítimo":
+                _formato_guardado = cab.get("formato_envio")
+                formato_envio = c6b.selectbox(
+                    "Formato de envío", FORMATOS_ENVIO_COT_MARITIMO,
+                    index=FORMATOS_ENVIO_COT_MARITIMO.index(_formato_guardado) if _formato_guardado in FORMATOS_ENVIO_COT_MARITIMO else 0,
+                    key=f"formatoenvio_{cot_id}_{etd_eta}",
+                )
+            else:
+                formato_envio = None
+                c6b.selectbox(
+                    "Formato de envío", ["No aplica"], disabled=True,
+                    key=f"formatoenvio_{cot_id}_{etd_eta}", help="Solo aplica a envíos marítimos.",
+                )
 
             c7, c8, c9 = st.columns(3)
             etd_date = c7.date_input("ETD", value=_parse_fecha(cab.get("carrier")), key=f"carrier_{cot_id}", format="DD/MM/YYYY")
@@ -3749,6 +3771,7 @@ def _render_cotizador_editor():
                 "cliente_id": cliente_id, "detalle_pedido": detalle_pedido,
                 "origen_cond_venta": origen, "contenedor": contenedor, "etd_eta": etd_eta,
                 "carrier": carrier, "freetime": freetime, "estado": estado,
+                "formato_envio": formato_envio,
                 "costo_financiero_pct": cf_pct, "seguro_pct": seguro_pct,
                 "tc_tributos": tc_tributos, "tc_operativos": tc_operativos, "arancel_sim": arancel_sim,
                 "tarifa_flete": tarifa_flete, "pct_certificacion": pct_certificacion,
@@ -3794,7 +3817,7 @@ def _render_cotizador_editor():
     cab_full = dict(cab)
     cab_full.update(cliente_nombre=mapa_clientes.get(cliente_id, ""), detalle_pedido=detalle_pedido,
                      origen_cond_venta=origen, contenedor=contenedor, etd_eta=etd_eta, carrier=carrier,
-                     freetime=freetime)
+                     freetime=freetime, formato_envio=formato_envio)
     # Simplificado: solo página 1 (Resumen + Detalle de mercadería), para
     # mandarle al cliente sin exponer el desglose línea por línea de gastos.
     # Completo: página 1 + 2 (con el desglose), para uso interno.

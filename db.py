@@ -646,6 +646,9 @@ COLUMNAS_NUEVAS = {
         "seguro_modo": "TEXT DEFAULT 'auto'",
         "seguro_manual_usd": "REAL DEFAULT 0",
         "tc_venta": "REAL DEFAULT 0",
+        # LCL/FCL20/FCL40 — solo aplica con envío marítimo (ver
+        # FORMATOS_ENVIO_COT_MARITIMO en app.py); con Aéreo queda NULL.
+        "formato_envio": "TEXT",
     },
     "cotizacion_productos": {
         "peso_kg": "REAL DEFAULT 0",
@@ -920,7 +923,7 @@ def save_cotizacion(cot_id, cabecera: dict, productos: list, gastos: list, total
              carrier=?, freetime=?, estado=?, costo_financiero_pct=?, seguro_pct=?,
              tc_tributos=?, tc_operativos=?, arancel_sim=?,
              tarifa_flete=?, pct_certificacion=?, gastos_origen=?, gastos_locales_hdr=?,
-             seguro_modo=?, seguro_manual_usd=?, tc_venta=?,
+             seguro_modo=?, seguro_manual_usd=?, tc_venta=?, formato_envio=?,
              total_usd_civa=?, total_ars_civa=?, total_usd_sviva=?, total_ars_sviva=?,
              venta_total_usd=?, ganancia_bruta_usd=?, rentabilidad_pct=?,
              actualizado_en=datetime('now','localtime')
@@ -935,7 +938,7 @@ def save_cotizacion(cot_id, cabecera: dict, productos: list, gastos: list, total
             cabecera.get("tarifa_flete", 0), cabecera.get("pct_certificacion", 0.5),
             cabecera.get("gastos_origen", 0), cabecera.get("gastos_locales_hdr", 0),
             cabecera.get("seguro_modo", "auto"), cabecera.get("seguro_manual_usd", 0),
-            cabecera.get("tc_venta", 0),
+            cabecera.get("tc_venta", 0), cabecera.get("formato_envio"),
             totales.get("total_c_iva_usd"), totales.get("total_c_iva_ars"),
             totales.get("total_s_iva_usd"), totales.get("total_s_iva_ars"),
             totales.get("venta_total_usd"), totales.get("ganancia_bruta_usd"),
