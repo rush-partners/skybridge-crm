@@ -417,6 +417,36 @@ __SB_VARS__
             display: none;
         }
 
+        /* "⚙️ Configuración", aparte del radio de navegación principal (ver
+        main()): un divider fino separa lo administrativo de los módulos de
+        negocio, y el link en sí toma el mismo lenguaje visual de ítem de
+        nav que stRadioOption (mismo padding/radio/borde izquierdo), pero
+        parte de un tono más apagado (text-secondary, sin negrita) porque
+        es un nivel secundario — solo pasa a naranja+negrita cuando es la
+        vista activa (key="…_activa", ver main()), igual que el ítem
+        seleccionado del radio de arriba. */
+        .sb-nav-divider {
+            height: 1px; background: var(--sb-border); margin: 10px 4px 8px 4px;
+        }
+        [class*="st-key-sidebar_config_link"] .stButton button {
+            width: 100%; justify-content: flex-start; text-align: left;
+            background: transparent !important; border: none !important;
+            border-left: 3px solid transparent !important; border-radius: 6px !important;
+            padding: 10px 12px !important; height: auto !important;
+            font-size: 14px; font-weight: 400; color: var(--sb-text-secondary) !important;
+            box-shadow: none !important;
+        }
+        [class*="st-key-sidebar_config_link"] .stButton button p {
+            font-size: 14px; font-weight: inherit; color: inherit !important;
+        }
+        [class*="st-key-sidebar_config_link"] .stButton button:hover {
+            background: var(--sb-surface) !important; color: var(--sb-navy) !important;
+        }
+        [class*="st-key-sidebar_config_link_activa"] .stButton button {
+            background: var(--sb-surface) !important; border-left-color: var(--sb-orange) !important;
+            color: var(--sb-orange-dark) !important; font-weight: 700;
+        }
+
         /* NOTA: st.dataframe (Glide Data Grid) se renderiza en <canvas> y
         toma sus colores del theme activo de Streamlit del lado del
         servidor, no de CSS del navegador — probado con --gdg-bg-cell/etc.
@@ -3670,11 +3700,36 @@ def _render_panel_cotizaciones():
     aprobadas = [c for c in cots_todas if (c.get("estado") or "Borrador") == "Aprobada"]
     sin_respuesta = [c for c in cots_todas if (c.get("estado") or "Borrador") == "Enviada"]
     rechazadas = [c for c in cots_todas if (c.get("estado") or "Borrador") == "Rechazada"]
-    m1, m2, m3, m4 = st.columns(4)
-    m1.metric("Cotizaciones realizadas", len(cots_todas))
-    m2.metric("Cotizaciones aprobadas", len(aprobadas))
-    m3.metric("Cotizaciones sin respuesta", len(sin_respuesta))
-    m4.metric("Cotizaciones rechazadas", len(rechazadas))
+    # Antes eran 4 st.metric sueltos, sin card ni color — el único texto
+    # "flotando" en blanco de toda la app, mientras el resto usa el mismo
+    # lenguaje de card con acento de color a la izquierda (cardwrap_/
+    # clientecard_/filacrm_/zona_). Reemplazado por 4 cards con ese mismo
+    # tratamiento: naranja de marca para el total (métrica principal, sin
+    # estado propio) y los colores de COLOR_ESTADO_COTIZACION para las
+    # otras 3 — los mismos que ya usa _badge_estado_cotizacion en las
+    # cards de abajo, así que el color no es decorativo: es el mismo
+    # código que el resto de la página ya usa para "Aprobada"/"Enviada"/
+    # "Rechazada".
+    stats = [
+        ("🧮", "Cotizaciones realizadas", len(cots_todas), "#E8652A"),
+        ("✅", "Aprobadas", len(aprobadas), COLOR_ESTADO_COTIZACION["Aprobada"]),
+        ("⏳", "Sin respuesta", len(sin_respuesta), COLOR_ESTADO_COTIZACION["Enviada"]),
+        ("❌", "Rechazadas", len(rechazadas), COLOR_ESTADO_COTIZACION["Rechazada"]),
+    ]
+    cols_stats = st.columns(4)
+    for col, (icono, label, valor, color) in zip(cols_stats, stats):
+        col.markdown(
+            f'<div style="background:var(--sb-surface); border:1px solid var(--sb-border); '
+            f'border-left:3px solid {color}; border-radius:8px; box-shadow:var(--sb-shadow); '
+            f'padding:14px 16px;">'
+            f'<div style="font-size:11px; font-weight:700; text-transform:uppercase; '
+            f'letter-spacing:0.05em; color:var(--sb-text-secondary); margin-bottom:6px; '
+            f'white-space:nowrap;">{icono} {label}</div>'
+            f'<div style="font-size:1.7rem; font-weight:800; color:var(--sb-navy); '
+            f'line-height:1.2;">{valor}</div>'
+            f'</div>',
+            unsafe_allow_html=True,
+        )
 
     st.markdown("#### Seguimiento por estado")
     clientes_con_cot = sorted({c["cliente_nombre"] for c in cots_todas if c.get("cliente_nombre")})
@@ -3912,11 +3967,9 @@ def _render_configuracion():
         # exportar_backup_sqlite() hace un SELECT * por cada tabla de la base
         # (11 en total) — con Turso eso tarda ~3s. st.download_button necesita
         # los bytes YA armados para poder dibujarse, así que antes corría en
-        # CADA render de Configuración (y como st.tabs ejecuta las 3 pestañas
-        # siempre, eso eran ~3s de más en CADA carga del Panel de Control,
-        # aunque nadie tocara este botón). Separarlo en dos pasos — preparar,
-        # después descargar — hace que esas 11 consultas corran solo cuando de
-        # verdad se van a usar.
+        # CADA render de esta sección, aunque nadie tocara este botón.
+        # Separarlo en dos pasos — preparar, después descargar — hace que esas
+        # 11 consultas corran solo cuando de verdad se van a usar.
         if st.button("📦 Preparar backup para descargar"):
             with st.spinner("Armando el backup..."):
                 st.session_state["_backup_bytes"] = db.exportar_backup_sqlite()
@@ -3956,13 +4009,24 @@ def vista_panel_control():
     st.header("📊 Panel de Control")
     st.caption("Seguimiento general e individual de cotizaciones e importaciones de todos los clientes.")
 
-    tab_cot, tab_imp, tab_config = st.tabs(["🧮 Cotizaciones", "📦 Importaciones", "⚙️ Configuración"])
+    tab_cot, tab_imp = st.tabs(["🧮 Cotizaciones", "📦 Importaciones"])
     with tab_cot:
         _render_panel_cotizaciones()
     with tab_imp:
         _render_panel_importaciones()
-    with tab_config:
-        _render_configuracion()
+
+
+def vista_configuracion():
+    # Página aparte (ver sidebar): antes vivía como 3ra pestaña de Panel de
+    # Control — administración (migración, usuarios, backup), no
+    # seguimiento comercial, así que no pertenecía ahí como si fuera un
+    # tercer tipo de dato de negocio junto a Cotizaciones/Importaciones.
+    st.header("⚙️ Configuración")
+    st.caption("Migración retroactiva de contactos, usuarios del sistema y backup de la base de datos.")
+    if st.button("← Volver", key="config_volver"):
+        st.session_state.mostrar_configuracion = False
+        st.rerun()
+    _render_configuracion()
 
 
 # ---------------------------------------------------------------- HISTORIAL
@@ -5472,6 +5536,7 @@ def _resetear_subpaginas():
     st.session_state.cotizador_detalle_id = None
     st.session_state.contacto_seleccionado = None
     st.session_state.panel_importacion_seleccionada = None
+    st.session_state.mostrar_configuracion = False
 
 
 # ---------------------------------------------------------------- MAIN
@@ -5507,6 +5572,26 @@ def main():
     pagina = st.sidebar.radio(
         "Navegación", PAGINAS, key="pagina_nav", on_change=_resetear_subpaginas,
     )
+
+    # "⚙️ Configuración" vivía como 3ra pestaña DENTRO de "📊 Panel de
+    # Control" — Tom pidió sacarla de ahí y ponerla aparte, en el panel
+    # izquierdo (no es un módulo de negocio como Clientes/Cotizador/CRM,
+    # es administración: migración retroactiva, usuarios, backup). Se la
+    # separa del radio principal con un divider — mismo criterio que usan
+    # Slack/Notion/etc. de tratar "Configuración" como un nivel aparte de
+    # la navegación primaria — en vez de sumarla como una 5ta opción más
+    # del mismo radio. key= condicional (…_activa) para pintarla resaltada
+    # con el mismo lenguaje visual del ítem de nav activo (borde naranja +
+    # texto en negrita) cuando es la vista actual, ya que un st.button
+    # nativo no tiene un estado "seleccionado" propio como sí tiene
+    # stRadioOption.
+    st.session_state.setdefault("mostrar_configuracion", False)
+    st.sidebar.markdown('<div class="sb-nav-divider"></div>', unsafe_allow_html=True)
+    config_activa = st.session_state.mostrar_configuracion
+    with st.sidebar.container(key=f"sidebar_config_link{'_activa' if config_activa else ''}"):
+        if st.button("⚙️ Configuración", key="btn_ir_configuracion", use_container_width=True):
+            st.session_state.mostrar_configuracion = True
+            st.rerun()
 
     # Tarjeta de cuenta, siempre pegada al pie real del sidebar (ver el
     # flex-column de más arriba en _inyectar_estilos) — antes eran 2 piezas
@@ -5579,7 +5664,9 @@ def main():
             _render_ficha_importacion_cliente(imp)
         return
 
-    if pagina == "📊 Panel de Control":
+    if st.session_state.get("mostrar_configuracion"):
+        vista_configuracion()
+    elif pagina == "📊 Panel de Control":
         vista_panel_control()
     elif pagina == "📋 Clientes":
         vista_clientes()
