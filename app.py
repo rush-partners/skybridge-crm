@@ -441,12 +441,24 @@ __SB_VARS__
             height: 1px; background: var(--sb-border); margin: 10px 4px 8px 4px;
         }
         [class*="st-key-sidebar_config_link"] .stButton button {
-            width: 100%; justify-content: flex-start; text-align: left;
+            width: 100%; justify-content: flex-start !important; text-align: left;
             background: transparent !important; border: none !important;
             border-left: 3px solid transparent !important; border-radius: 6px !important;
             padding: 10px 12px !important; height: auto !important;
             font-size: 14px; font-weight: 400; color: var(--sb-text-secondary) !important;
             box-shadow: none !important;
+        }
+        /* El <button> ya queda alineado a la izquierda con la regla de
+        arriba, pero Streamlit envuelve el ícono+label en un par de
+        div/span internos (no propios, generados por el widget) que traen
+        SU PROPIO justify-content:center — con use_container_width=True eso
+        centraba "⚙️ Configuración" en vez de dejarlo pegado al borde
+        izquierdo como el resto de los ítems del nav (Panel de Control,
+        Clientes...), que no pasan por ese wrapper. Confirmado inspeccionando
+        el árbol real del botón. */
+        [class*="st-key-sidebar_config_link"] .stButton button > div,
+        [class*="st-key-sidebar_config_link"] .stButton button span {
+            justify-content: flex-start !important;
         }
         [class*="st-key-sidebar_config_link"] .stButton button p {
             font-size: 14px; font-weight: inherit; color: inherit !important;
@@ -2132,7 +2144,7 @@ def _render_contenido_importacion(imp, cotizaciones_cliente):
 
 def _render_fila_importacion_cliente(imp):
     """Card 'hoja' de una importación en la ficha de cliente — mismo
-    lenguaje visual que Cotizaciones/Clientes/CRM: número/tipo de envío,
+    lenguaje visual que Cotizaciones/Clientes/CRM: número/producto,
     proveedor/origen, badge de estado y un único botón 'Ver detalle →' que
     abre la ficha completa (antes era un desplegable con todo el formulario
     adentro, incómodo con varias importaciones)."""
@@ -2140,9 +2152,13 @@ def _render_fila_importacion_cliente(imp):
     with st.container(border=True, key=f"impfila_{imp['id']}"):
         c1, c2, c3, c4 = st.columns([2.2, 2.6, 1.6, 1.8], vertical_alignment="center")
         prefijo = f"{icono} " if icono else ""
+        # Pedido de Tom: el subtítulo debajo del número mostraba el TIPO de
+        # envío en texto ("Envío marítimo"/"Envío aéreo") — redundante con
+        # el emoji (🚢/✈️) que ya va en el propio número. El producto es
+        # información nueva, no repetida.
         c1.markdown(
             f'<div style="font-weight:700; font-size:14px;">{prefijo}{html.escape(imp["numero"])}</div>'
-            f'<div style="font-size:12px; color:var(--sb-text-secondary); margin-top:2px;">{html.escape(imp.get("tipo_envio") or "—")}</div>',
+            f'<div style="font-size:12px; color:var(--sb-text-secondary); margin-top:2px;">{html.escape(imp.get("producto") or "—")}</div>',
             unsafe_allow_html=True,
         )
         c2.markdown(
