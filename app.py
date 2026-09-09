@@ -2716,6 +2716,17 @@ def _abrir_cotizacion_en_cotizador(cid):
     _cargar_estado_cotizacion(cid)
     st.session_state.pagina_nav = "🧮 Cotizador"
     st.session_state.cotizador_modo = "editor"
+    # Pedido de Tom: abrir una cotización (ver/retomar una ya cargada, no
+    # solo crearla) es en sí misma la señal de que el contacto está siendo
+    # cotizado activamente — pasa a "Cotizado"/Calificado si todavía no
+    # llegó ahí (nunca retrocede, ver _avanzar_etapa_si_corresponde).
+    cliente_id = (st.session_state.cot_cab or {}).get("cliente_id")
+    if cliente_id:
+        contacto_vinculado = _asegurar_contacto_para_cliente(cliente_id)
+        if contacto_vinculado:
+            _avanzar_etapa_si_corresponde(
+                contacto_vinculado["id"], "Cotizado", st.session_state.get("crm_autor", "")
+            )
 
 
 def _cotizar_cliente(cliente_id):
@@ -2726,11 +2737,16 @@ def _cotizar_cliente(cliente_id):
     # Mismo patrón que _cotizar_contacto en sentido inverso (cliente →
     # contacto en vez de contacto → cliente): asegura el vínculo de CRM —
     # sin esto, cotizar directo desde Clientes (sin pasar por un contacto de
-    # CRM) dejaba el cliente sin contacto vinculado. Ya NO avanza la etapa acá
-    # (crear un borrador no es evidencia de nada por sí sola) — el avance a
-    # "Cotizado"/Calificado ahora pasa por _cambiar_estado_cotizacion cuando
-    # esa cotización se manda de verdad (estado 'Enviada').
-    _asegurar_contacto_para_cliente(cliente_id)
+    # CRM) dejaba el cliente sin contacto vinculado. Pedido de Tom: crear y
+    # abrir una cotización nueva ES "abrir una cotización" — avanza a
+    # "Cotizado"/Calificado acá mismo (antes esto esperaba a que se mandara;
+    # ahora ese envío avanza un escalón más, a "Negociación" — ver el
+    # bloque "Enviada" en _guardar_cotizacion/_cambiar_estado_cotizacion).
+    contacto_vinculado = _asegurar_contacto_para_cliente(cliente_id)
+    if contacto_vinculado:
+        _avanzar_etapa_si_corresponde(
+            contacto_vinculado["id"], "Cotizado", st.session_state.get("crm_autor", "")
+        )
     _cargar_estado_cotizacion(new_id)
     st.session_state.pagina_nav = "🧮 Cotizador"
     st.session_state.cotizador_modo = "editor"
@@ -3684,14 +3700,15 @@ def _render_cotizador_editor():
             contacto_vinculado = _marcar_ganado_por_cliente(cliente_id)
             if contacto_vinculado:
                 mensaje += f" '{contacto_vinculado['nombre']}' pasó a Cliente."
-        # Mismo criterio: mandar la cotización de verdad ("Enviada") es la
-        # evidencia real de que el contacto avanzó a Cotizado/Calificado —
-        # ya no alcanza con solo crear el borrador (ver _cotizar_contacto).
+        # Pedido de Tom: abrir/crear la cotización ya adelanta al contacto a
+        # Cotizado/Calificado (ver _cotizar_cliente/_abrir_cotizacion_en_cotizador)
+        # — mandarla de verdad ("Enviada") es un escalón más: pasa a
+        # Negociación/"En negociación".
         elif estado == "Enviada" and cliente_id:
             contacto_vinculado = _asegurar_contacto_para_cliente(cliente_id)
             if contacto_vinculado:
                 _avanzar_etapa_si_corresponde(
-                    contacto_vinculado["id"], "Cotizado", st.session_state.get("crm_autor", "")
+                    contacto_vinculado["id"], "Negociación", st.session_state.get("crm_autor", "")
                 )
         _cargar_estado_cotizacion(cot_id)
         _flash(mensaje)
@@ -4102,12 +4119,13 @@ def _cambiar_estado_cotizacion(cot_id, cliente_id):
         if contacto_vinculado:
             mensaje += f" '{contacto_vinculado['nombre']}' pasó a Cliente."
     # Mismo criterio que en _guardar_cotizacion: mandar la cotización
-    # ("Enviada") es la evidencia real de avance a Cotizado/Calificado.
+    # ("Enviada") avanza un escalón más allá de Cotizado/Calificado, a
+    # Negociación/"En negociación".
     elif nuevo_estado == "Enviada" and cliente_id:
         contacto_vinculado = _asegurar_contacto_para_cliente(cliente_id)
         if contacto_vinculado:
             _avanzar_etapa_si_corresponde(
-                contacto_vinculado["id"], "Cotizado", st.session_state.get("crm_autor", "")
+                contacto_vinculado["id"], "Negociación", st.session_state.get("crm_autor", "")
             )
     if st.session_state.get("cot_cab", {}).get("id") == cot_id:
         st.session_state.cot_cab["estado"] = nuevo_estado
@@ -5026,10 +5044,8 @@ def _cotizar_contacto(contact_id):
     Clientes, crea uno a partir de sus datos (nombre/empresa, email,
     WhatsApp) y lo vincula — así se reutiliza tal cual el motor de
     cotizador que ya existe para clientes, en vez de duplicarlo para
-    contactos. Ya NO avanza la etapa acá — crear un borrador no es evidencia
-    de nada por sí sola (ver _cotizar_cliente); el avance a
-    'Cotizado'/Calificado pasa por _cambiar_estado_cotizacion cuando esa
-    cotización se manda de verdad (estado 'Enviada')."""
+    contactos. El avance a 'Cotizado'/Calificado lo hace _cotizar_cliente
+    (ver ahí) al crear y abrir la cotización nueva."""
     contacto = db.get_contact(contact_id)
     cliente_id = contacto.get("cliente_id")
     if not cliente_id:
