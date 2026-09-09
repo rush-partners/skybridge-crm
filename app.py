@@ -5102,8 +5102,25 @@ def _reconciliar_etapa_por_cotizaciones(contacto, resumen_por_cliente, autor):
     (una sola consulta, se pasa ya calculada para no repetirla contacto por
     contacto). Actualiza contacto["etapa"] en memoria y devuelve la etapa
     vigente, para que el render que lo llamó ya refleje el cambio sin
-    esperar el próximo rerun."""
+    esperar el próximo rerun.
+
+    BUG corregido (reportado por Tom: marcar a un contacto como Descartado
+    y que "no avanza a la etapa correspondiente"): crm.es_avance() trata a
+    "Perdido" como comodín — cualquier etapa de progreso cuenta como avance
+    DESDE Perdido (así se puede reactivar un contacto perdido). Esta
+    reconciliación corre en CADA render, así que si el cliente ya tenía
+    cotizaciones viejas (enviada/aprobada/rechazada/borrador), apenas se
+    marcaba a alguien como Descartado, este mismo chequeo lo volvía a subir
+    a Cotizado/Negociación en el rerun siguiente — la marca de Descartado
+    nunca llegaba a pisar la pantalla. Perdido es una salida deliberada del
+    embudo: no se reactiva solo porque haya cotizaciones dando vueltas en la
+    base. Sigue siendo reactivable a mano (selectbox "Actualizar estado") o
+    automáticamente cuando se genera una cotización NUEVA de verdad, en el
+    momento exacto de ese evento (_avanzar_etapa_si_corresponde, que no pasa
+    por acá) — solo esta pasada pasiva de reconciliación lo deja en paz."""
     etapa = contacto.get("etapa") or crm.STAGE_INICIAL
+    if etapa == "Perdido":
+        return etapa
     cliente_id = contacto.get("cliente_id")
     resumen = resumen_por_cliente.get(cliente_id) if cliente_id else None
     if resumen and resumen.get("total"):
