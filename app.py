@@ -220,10 +220,22 @@ __SB_VARS__
         los números sí se vieran bien. */
         [data-testid="stDateInputField"] {
             background: var(--sb-surface) !important; border-color: var(--sb-border) !important;
+            width: 100% !important;
         }
         [data-testid="stDateInputField"] [role="spinbutton"],
         [data-testid="stDateInputField"] [data-type="literal"] {
             color: var(--sb-navy) !important;
+        }
+        /* Pedido de Tom: "dd/mm/yyyy – dd/mm/yyyy" (un rango completo) no
+        entraba en columnas angostas con el tamaño de letra por defecto de
+        Streamlit — se veía cortado ("...dd/mm" sin el año) en vez de
+        desbordar prolijo. Un toque más chico alcanza para que entre cómodo
+        en la mayoría de los anchos de pantalla, acá y en cualquier otro
+        date_input de la app (ej. "Rango de fechas" en Filtros avanzados
+        del Cotizador) — selector global, no uno por pantalla. */
+        [data-testid="stDateInputField"] [role="spinbutton"],
+        [data-testid="stDateInputField"] [data-type="literal"] {
+            font-size: 13px !important;
         }
         /* Steppers +/- de los number_input: el SVG usa fill="currentColor"
         pero Streamlit les fija su propio "color" fijo (navy claro),
@@ -1329,6 +1341,26 @@ def _zona_header_html(estado, cantidad, sufijo):
         f'margin-bottom:2px;">{html.escape(estado)}</div>'
         f'<div style="font-size:12px; color:var(--sb-text-secondary); margin-bottom:10px;">'
         f'{cantidad} {sufijo}</div>'
+    )
+
+
+def _seccion_header_html(icono, texto):
+    """Título de sub-sección dentro de una pantalla (ej. "Seguimiento por
+    estado" en Panel de Control) — antes un "#### ..." de Streamlit
+    suelto directo sobre el fondo de la página, sin relación visual con las
+    cards de alrededor (ni ícono, ni el mismo peso/tamaño que el resto de
+    los encabezados de sección de la app, con márgenes por defecto de
+    Streamlit que no calzaban con el ritmo del resto de la pantalla —
+    quedaba "burdo", en palabras de Tom). Mismo lenguaje visual que
+    .sb-venta-label (eyebrow: mayúsculas + letter-spacing), un poco más
+    grande y con ícono para que funcione como título, no como caption."""
+    return (
+        f'<div style="display:flex; align-items:center; gap:8px; '
+        f'margin:28px 0 14px 2px;">'
+        f'<span style="font-size:15px; line-height:1;">{icono}</span>'
+        f'<span style="font-size:15px; font-weight:700; color:var(--sb-navy); '
+        f'text-transform:uppercase; letter-spacing:0.04em;">{html.escape(texto)}</span>'
+        f'</div>'
     )
 
 
@@ -3777,7 +3809,7 @@ def _render_panel_cotizaciones():
         ("❌", "Rechazadas", len(rechazadas), COLOR_ESTADO_COTIZACION["Rechazada"]),
     ])
 
-    st.markdown("#### Seguimiento por estado")
+    st.markdown(_seccion_header_html("🗂️", "Seguimiento por estado"), unsafe_allow_html=True)
     clientes_con_cot = sorted({c["cliente_nombre"] for c in cots_todas if c.get("cliente_nombre")})
     # Mismo lenguaje visual que el resto de los buscadores de la app
     # (formrow_): antes el buscador + el selectbox de cliente quedaban
@@ -3869,7 +3901,7 @@ def _render_panel_importaciones():
         ("✅", "Completadas", len(completadas), COLOR_ESTADO_IMPORTACION["Entregada"]),
     ])
 
-    st.markdown("#### Seguimiento por estado")
+    st.markdown(_seccion_header_html("🗂️", "Seguimiento por estado"), unsafe_allow_html=True)
     clientes_con_imp = sorted({i["cliente_nombre"] for i in imps_todas if i.get("cliente_nombre")})
     productos_con_imp = sorted({i["producto"] for i in imps_todas if i.get("producto")})
 
@@ -3885,8 +3917,14 @@ def _render_panel_importaciones():
     # anchas. Todo en un solo renglón, agrupado en la misma card "formrow_"
     # que el resto de los buscadores.
     with st.container(border=True, key="formrow_panel_filtros_imp"):
+        # Rango ETA es el que más ancho necesita de los 5 (un rango
+        # completo, "dd/mm/yyyy – dd/mm/yyyy") — le corresponde más peso
+        # relativo que a un selectbox/checkbox, que truncan mejor si les
+        # falta espacio. Sumado a la letra un toque más chica del date_input
+        # (ver [data-testid="stDateInputField"] más arriba), entra entero en
+        # pantallas bastante más angostas que antes.
         c1, c2, c3, c4, c5 = st.columns(
-            [1.6, 1.6, 2.3, 1.5, 1.5], vertical_alignment="bottom",
+            [1.4, 1.4, 2.9, 1.4, 1.4], vertical_alignment="bottom",
         )
         cliente_filtro = c1.selectbox(
             "Cliente", clientes_con_imp, index=None, placeholder="Todos los clientes",
@@ -4477,8 +4515,20 @@ def _mapa_etapa_por_cliente():
     Control). Se lee en vivo del contacto en cada render — sin duplicar el
     dato ni guardar nada nuevo — así que cambiar la etapa desde la card del
     CRM (ej. "Cotizado" → "Negociación") se ve reflejado en todos esos
-    lugares de inmediato, sin ningún paso extra."""
-    return {c["cliente_id"]: c.get("etapa") or crm.STAGE_INICIAL for c in db.list_contacts() if c.get("cliente_id")}
+    lugares de inmediato, sin ningún paso extra. Antes de armar el mapa,
+    reconcilia cada contacto contra sus cotizaciones reales
+    (_reconciliar_etapa_por_cotizaciones) — así una cotización cargada por
+    cualquier camino (no solo el botón puntual que dispara
+    _avanzar_etapa_si_corresponde) también se refleja acá, sin depender de
+    haber agarrado ese evento exacto."""
+    resumen_cot = db.resumen_cotizaciones_por_cliente()
+    autor = st.session_state.get("crm_autor", "")
+    mapa = {}
+    for c in db.list_contacts():
+        if not c.get("cliente_id"):
+            continue
+        mapa[c["cliente_id"]] = _reconciliar_etapa_por_cotizaciones(c, resumen_cot, autor)
+    return mapa
 
 
 def _badge_estado_importacion(estado):
@@ -4856,6 +4906,14 @@ def _render_lista_contactos():
         )
 
     todos = db.list_contacts(search=search)
+    # Reconciliar ACÁ, antes de agrupar en columnas del kanban: así el
+    # tablero de Contactos siempre refleja las cotizaciones reales de cada
+    # contacto (ver _reconciliar_etapa_por_cotizaciones) apenas se lo mira,
+    # sin depender de haber reabierto la cotización puntual que faltaba.
+    resumen_cot = db.resumen_cotizaciones_por_cliente()
+    autor_reconciliacion = st.session_state.get("crm_autor", "")
+    for c in todos:
+        _reconciliar_etapa_por_cotizaciones(c, resumen_cot, autor_reconciliacion)
     # 'Ganado' ya tiene su propia columna ('cliente', ver crm.kanban_grupo)
     # con un resumen operativo de solo lectura en vez de excluirse de la
     # vista — antes se gestionaba solo desde el módulo Clientes.
@@ -4959,6 +5017,41 @@ def _avanzar_etapa_si_corresponde(contact_id, etapa_objetivo, autor):
     etapa_actual = contacto.get("etapa") or crm.STAGE_INICIAL
     if crm.es_avance(etapa_actual, etapa_objetivo):
         db.change_etapa_contacto(contact_id, etapa_objetivo, autor)
+
+
+def _reconciliar_etapa_por_cotizaciones(contacto, resumen_por_cliente, autor):
+    """Corrige la etapa de UN contacto contra sus cotizaciones REALES en la
+    base, sin importar por qué camino se creó o se mandó cada una (Cotizador
+    directo, "➕ Cotizar" desde CRM, desde Clientes, editando el selector de
+    Cliente adentro del formulario, etc.). Complementa a
+    _avanzar_etapa_si_corresponde (que dispara en el momento exacto de un
+    click puntual: abrir/crear/mandar) con una segunda pasada que no
+    depende de haber agarrado ese evento — así un contacto con una
+    cotización cargada por cualquier vía queda bien apenas se lo vuelve a
+    mirar, no hace falta reabrir esa cotización puntual para que "prenda".
+    Cualquier cotización (aunque sea un borrador) = piso Cotizado/
+    Calificado; alguna Enviada, Aprobada o Rechazada (esta última implica
+    que en algún momento SE MANDÓ) = piso Negociación/"En negociación".
+    Nunca retrocede (misma regla de crm.es_avance que el resto del CRM).
+    resumen_por_cliente: salida de db.resumen_cotizaciones_por_cliente()
+    (una sola consulta, se pasa ya calculada para no repetirla contacto por
+    contacto). Actualiza contacto["etapa"] en memoria y devuelve la etapa
+    vigente, para que el render que lo llamó ya refleje el cambio sin
+    esperar el próximo rerun."""
+    etapa = contacto.get("etapa") or crm.STAGE_INICIAL
+    cliente_id = contacto.get("cliente_id")
+    resumen = resumen_por_cliente.get(cliente_id) if cliente_id else None
+    if resumen and resumen.get("total"):
+        objetivo = (
+            "Negociación"
+            if (resumen.get("enviadas") or resumen.get("aprobadas") or resumen.get("rechazadas"))
+            else "Cotizado"
+        )
+        if crm.es_avance(etapa, objetivo):
+            db.change_etapa_contacto(contacto["id"], objetivo, autor)
+            etapa = objetivo
+            contacto["etapa"] = objetivo
+    return etapa
 
 
 def _asegurar_contacto_para_cliente(cliente_id):
@@ -5553,6 +5646,13 @@ def vista_crm():
         if contacto is None:
             st.session_state.contacto_seleccionado = None
             st.rerun()
+        # Mismo motivo que en _render_lista_contactos/_mapa_etapa_por_cliente:
+        # esta ficha se puede abrir directo (deep link desde una card, sin
+        # pasar por el tablero de Contactos) — reconciliar acá también para
+        # que se ponga al día sola igual.
+        _reconciliar_etapa_por_cotizaciones(
+            contacto, db.resumen_cotizaciones_por_cliente(), st.session_state.get("crm_autor", "")
+        )
         _render_ficha_contacto(contacto)
         return
 
