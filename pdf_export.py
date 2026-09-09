@@ -6,6 +6,7 @@ pesadas): ver los tokens de color en _inyectar_estilos() de app.py.
 """
 from io import BytesIO
 from datetime import datetime
+from xml.sax.saxutils import escape as _xml_escape
 
 from reportlab.lib import colors
 from reportlab.lib.enums import TA_RIGHT
@@ -80,7 +81,7 @@ def generar_pdf_cotizacion(cab: dict, resultado: dict, completo: bool = True) ->
         normal,
     )
     meta = Paragraph(
-        f'<font color="#0F172A"><b>Cotización {cab.get("numero") or "-"}</b></font>'
+        f'<font color="#0F172A"><b>Cotización {_xml_escape(str(cab.get("numero") or "-"))}</b></font>'
         f'<br/><font color="#64748B" size="8">{datetime.now().strftime("%d/%m/%Y")}</font>',
         meta_right,
     )
@@ -97,7 +98,13 @@ def generar_pdf_cotizacion(cab: dict, resultado: dict, completo: bool = True) ->
     # ---- Datos del cliente / operación: pares etiqueta-valor sin grilla,
     # mismo lenguaje visual que .sb-field-label / .sb-field-value. ----
     def _campo(etiqueta, valor):
-        return Paragraph(f"{etiqueta}<br/><font color=\"#0F172A\"><b>{valor or '-'}</b></font>", label_style)
+        # valor es dato cargado por el usuario (nombre de cliente, detalle
+        # de pedido, etc.) — se escapa antes de meterlo en el marcado del
+        # Paragraph para que un "&"/"<"/">" no se interprete como XML
+        # inválido y trunque el texto (mismo bug que en Detalle de
+        # mercadería, ver _celda más abajo).
+        valor_seguro = _xml_escape(str(valor)) if valor else "-"
+        return Paragraph(f'{etiqueta}<br/><font color="#0F172A"><b>{valor_seguro}</b></font>', label_style)
 
     info_rows = [
         [_campo("CLIENTE", cab.get("cliente_nombre")), _campo("CUIT", cab.get("cliente_cuit"))],
@@ -173,7 +180,14 @@ def generar_pdf_cotizacion(cab: dict, resultado: dict, completo: bool = True) ->
     )
 
     def _celda(texto):
-        return Paragraph(str(texto), cell_style)
+        # escape: Paragraph interpreta el texto como XML/HTML liviano, así
+        # que una descripción con "&", "<" o ">" (común: "Tela & lona",
+        # "Producto <mod. X>") se estaba parseando como marcado inválido y
+        # reportlab la cortaba en silencio en ese punto — el producto
+        # aparecía con el nombre truncado (y a veces el resto de esa celda
+        # quedaba corrido/superpuesto). Escapando esos caracteres se
+        # imprimen tal cual, como texto plano.
+        return Paragraph(_xml_escape(str(texto)), cell_style)
 
     prod_rows = [[
         _head("Descripción", False), _head("NCM", False), _head("FOB Unit."), _head("Cant."),
@@ -249,7 +263,11 @@ def generar_pdf_cotizacion(cab: dict, resultado: dict, completo: bool = True) ->
             tot_final += final
             if round(final, 2) == 0:
                 return
-            gastos_rows.append([concepto, f"{monto:,.2f}", f"{iva:,.2f}", f"{final:,.2f}"])
+            # Mismo motivo que Descripción en "Detalle de mercadería": el
+            # concepto de un gasto también es texto libre (puede ser largo
+            # o traer "&"/"<"/">"), así que va en Paragraph + escapado para
+            # que ajuste a varias líneas en vez de superponerse o cortarse.
+            gastos_rows.append([_celda(concepto), f"{monto:,.2f}", f"{iva:,.2f}", f"{final:,.2f}"])
 
         _fila("Mercadería (FOB)", resultado["fob_total_sum"])
         _fila("Costo financiero", resultado["costo_financiero"])
@@ -279,6 +297,7 @@ def generar_pdf_cotizacion(cab: dict, resultado: dict, completo: bool = True) ->
             ("LINEBELOW", (0, 1), (-1, -1), 0.4, BORDER),
             ("BACKGROUND", (0, -1), (-1, -1), ZONE),
             ("ALIGN", (1, 0), (-1, -1), "RIGHT"),
+            ("VALIGN", (0, 0), (-1, -1), "TOP"),
             ("TOPPADDING", (0, 0), (-1, -1), 4), ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
             ("LEFTPADDING", (0, 0), (-1, -1), 6), ("RIGHTPADDING", (0, 0), (-1, -1), 6),
             ("LEFTPADDING", (0, 0), (0, -1), 0), ("RIGHTPADDING", (-1, 0), (-1, -1), 0),
