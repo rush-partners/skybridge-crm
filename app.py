@@ -1621,14 +1621,16 @@ def pct(v):
 # alcanzaba con desactivar al usuario (el token ya emitido seguía
 # sirviendo hasta expirar solo, a los 30 días).
 #
-# Revalidar contra la base en CADA rerun (cada click de toda la app) sería
-# una consulta a Turso de más por click — de más porque, una vez adentro,
-# lo normal es que la sesión siga siendo válida. Por eso solo se
-# revalida cada _REVALIDACION_INTERVALO: para el uso normal es
-# transparente, y "Cerrar sesión" desde Configuración tarda como mucho
-# ese ratito en surtir efecto en el navegador de la persona afectada (en
-# su próximo click — Streamlit no empuja nada al cliente sin que el
-# usuario haga algo).
+# Se revalida contra la base en CADA rerun (cada click de toda la app), para
+# que "Cerrar sesión" desde Configuración corte el acceso ya en el próximo
+# click de la persona afectada — Streamlit no empuja nada al cliente sin que
+# el usuario haga algo, así que "instantáneo" no es posible, pero sí que no
+# dependa de un temporizador. Es una consulta liviana (SELECT por token,
+# indexado) así que hacerla en cada click no pesa.
+#
+# Lo que SÍ se sigue limitando con _REVALIDACION_INTERVALO es el UPDATE de
+# "último visto" (tocar_sesion): eso es una escritura, y no hace falta
+# registrar el latido cada click — alcanza con cada tanto.
 _REVALIDACION_INTERVALO = timedelta(minutes=3)
 
 
@@ -1651,14 +1653,12 @@ def _restaurar_sesion_desde_token():
 def _revalidar_sesion_si_corresponde():
     """Sesión ya restaurada en ESTE session_state (no hace falta volver a
     pasar por el token de la URL en cada rerun, Streamlit lo conserva
-    solo) — pero igual hay que chequear cada tanto que nadie la haya
+    solo) — pero igual hay que chequear en CADA click que nadie la haya
     cerrado desde Configuración, o desactivado al usuario, mientras
-    tanto. Ver _REVALIDACION_INTERVALO arriba."""
+    tanto. El heartbeat de "último visto" sí se sigue espaciando cada
+    _REVALIDACION_INTERVALO (ver arriba)."""
     token = st.session_state.get("_token_sesion")
     if not token:
-        return
-    verificada_en = st.session_state.get("_sesion_verificada_en")
-    if verificada_en and datetime.now() - verificada_en < _REVALIDACION_INTERVALO:
         return
     usuario = db.validar_sesion(token)
     if not usuario:
@@ -1668,8 +1668,10 @@ def _revalidar_sesion_si_corresponde():
             del st.query_params["sesion"]
         return
     st.session_state.usuario_autenticado = usuario
-    st.session_state["_sesion_verificada_en"] = datetime.now()
-    db.tocar_sesion(token)
+    verificada_en = st.session_state.get("_sesion_verificada_en")
+    if not verificada_en or datetime.now() - verificada_en >= _REVALIDACION_INTERVALO:
+        st.session_state["_sesion_verificada_en"] = datetime.now()
+        db.tocar_sesion(token)
 
 
 def _gate_login():
