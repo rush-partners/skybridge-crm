@@ -1145,6 +1145,23 @@ def list_importacion_notas(importacion_id):
     return [dict(r) for r in rows]
 
 
+def update_importacion_nota(nota_id, texto):
+    # Solo el texto — la fecha queda como quedó al crearla (a mano en
+    # migración, o "ahora" al cargarla desde la ficha): editar el texto no
+    # es lo mismo que decir "esto pasó en otro momento".
+    conn = get_connection()
+    conn.execute("UPDATE importacion_log SET texto=? WHERE id=?", (texto, nota_id))
+    conn.commit()
+    conn.close()
+
+
+def delete_importacion_nota(nota_id):
+    conn = get_connection()
+    conn.execute("DELETE FROM importacion_log WHERE id=?", (nota_id,))
+    conn.commit()
+    conn.close()
+
+
 def delete_importacion(imp_id):
     conn = get_connection()
     conn.execute("DELETE FROM importaciones WHERE id=?", (imp_id,))

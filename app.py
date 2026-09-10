@@ -2035,6 +2035,20 @@ def _render_detalle_final_importacion(imp, cotizacion):
     }
 
 
+@st.dialog("Eliminar nota")
+def _dialog_eliminar_nota_importacion(nota_id):
+    st.warning("¿Confirmás eliminar esta nota de seguimiento? Esta acción no se puede deshacer.")
+    c1, c2 = st.columns(2)
+    if c1.button("Cancelar", use_container_width=True, key=f"cancelnotaimp_{nota_id}"):
+        st.rerun()
+    if c2.button("Sí, eliminar", type="primary", use_container_width=True, key=f"confirmnotaimp_{nota_id}"):
+        try:
+            db.delete_importacion_nota(nota_id)
+        except db.DBError as e:
+            _flash(f"No se pudo eliminar la nota: {e}", icon="❌")
+        st.rerun()
+
+
 def _render_timeline_importacion(imp_id):
     """Bitácora de seguimiento de una importación — mismo patrón que el
     '🕓 Timeline' de la ficha de contacto CRM (ver _agregar_nota_contacto):
@@ -2054,12 +2068,25 @@ def _render_timeline_importacion(imp_id):
         st.caption("Sin notas de seguimiento todavía.")
     for n in notas:
         with st.container(border=True, key=f"notaimp_{n['id']}"):
+            c1, c2, c3 = st.columns([5, 0.6, 0.6])
             autor_txt = f" · {html.escape(n['autor'])}" if n.get("autor") else ""
-            st.markdown(
+            c1.markdown(
                 f'<div style="font-size:12px; color:var(--sb-text-secondary);">'
                 f'{_fmt_fecha_hora(n["fecha"])}{autor_txt}</div>',
                 unsafe_allow_html=True,
             )
+            # icon=, no el emoji "✏️" como label — mismo criterio que el
+            # popover de renombrar documentos (ver más arriba en este archivo).
+            with c2.popover("", icon=":material/edit:", use_container_width=True, help="Editar nota"):
+                nuevo_texto = st.text_area("Texto de la nota", value=n["texto"] or "", key=f"editnotaimp_{n['id']}")
+                if st.button("💾 Guardar", key=f"editnotaimpbtn_{n['id']}"):
+                    if nuevo_texto.strip():
+                        db.update_importacion_nota(n["id"], nuevo_texto.strip())
+                        st.rerun()
+                    else:
+                        st.error("La nota no puede quedar vacía.")
+            if c3.button("", icon=":material/delete:", use_container_width=True, help="Eliminar nota", key=f"delnotaimp_{n['id']}"):
+                _dialog_eliminar_nota_importacion(n["id"])
             st.markdown(html.escape(n["texto"] or "").replace("\n", "<br>"), unsafe_allow_html=True)
 
 

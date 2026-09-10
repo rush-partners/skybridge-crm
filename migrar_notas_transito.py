@@ -45,6 +45,16 @@ RAIZ = Path(__file__).parent
 SECRETS_PATH = RAIZ / ".streamlit" / "secrets.toml"
 
 LINEA_FECHA_RE = re.compile(r"^(\d{1,2})/(\d{1,2})\.?\s*(.*)$")
+# Viñeta real encontrada en los datos ("* 02/07 ...") — solo "*", no "-":
+# varias notas usan líneas de guiones como separador visual
+# ("--------------"), y esas NO son viñetas de fecha.
+VINETA_RE = re.compile(r"^\*\s*")
+# Día de la semana antes de la fecha, otra variante real ("* Lunes 27/07
+# ...") — se pela sin guardarlo (la fecha ya lo determina) para que el
+# regex de fecha de abajo pueda matchear.
+DIA_SEMANA_RE = re.compile(
+    r"^(lunes|martes|mi[ée]rcoles|jueves|viernes|s[áa]bado|domingo)\s+", re.IGNORECASE,
+)
 
 
 def _cargar_credenciales():
@@ -69,7 +79,8 @@ def _parsear_lineas(texto):
         linea = linea_cruda.strip()
         if not linea:
             continue
-        m = LINEA_FECHA_RE.match(linea)
+        candidata = DIA_SEMANA_RE.sub("", VINETA_RE.sub("", linea))
+        m = LINEA_FECHA_RE.match(candidata)
         dia = mes = None
         if m:
             posible_dia, posible_mes = int(m.group(1)), int(m.group(2))
@@ -95,13 +106,21 @@ def _resolver_fechas(entradas, creado_en_str):
         creado_en = date.today()
 
     year_actual = creado_en.year
-    prev_md = (creado_en.day, creado_en.month)
+    # None hasta la primera nota CON fecha: esa primera nota fija el año de
+    # arranque (creado_en.year) SIN chequeo de "retroceso" — una importación
+    # cargada retroactivamente (creado_en tarde, notas de meses antes en el
+    # mismo año, ej. creada 29/08 con notas desde 16/06) es un caso real y
+    # común, no un cruce de año. Comparar la primera nota contra creado_en
+    # (en vez de contra la nota anterior, que todavía no existe) es lo que
+    # antes disparaba un año de más de pedo. Recién a partir de la 2da nota
+    # con fecha tiene sentido detectar un cruce real (ej. Dic -> Ene).
+    prev_md = None
     resultado = []
     for e in entradas:
         if e["sin_fecha"]:
             fecha_iso = f"{creado_en.isoformat()} 12:00:00"
         else:
-            if (e["mes"], e["dia"]) < (prev_md[1], prev_md[0]):
+            if prev_md is not None and (e["mes"], e["dia"]) < (prev_md[1], prev_md[0]):
                 year_actual += 1
             try:
                 fecha = date(year_actual, e["mes"], e["dia"])
