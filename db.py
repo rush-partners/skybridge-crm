@@ -4,6 +4,7 @@ La base de datos vive en Turso (servicio de base de datos en la nube,
 compatible con SQLite vía SQL sobre HTTP) — no como archivo local. Así los
 datos sobreviven un reinicio o redeploy del hosting, que es justo lo que un
 archivo .db suelto en el disco NO garantiza en un plan gratuito."""
+import base64
 import http.client
 import json
 import os
@@ -367,12 +368,35 @@ CREATE TABLE IF NOT EXISTS settings (
     value TEXT
 );
 
+-- Papelera de reciclaje genérica (Tom, sept 2026: "una papelera para todo
+-- lo que elimino, que se autoelimine a los 30 días o la pueda vaciar
+-- cuando quiera"). En vez de una columna "eliminado_en" en cada una de las
+-- 8 tablas que hoy borran filas de verdad (lo que hubiera obligado a
+-- agregar "WHERE eliminado_en IS NULL" a las ~30 consultas de listado
+-- repartidas por toda la app, con el riesgo real de olvidarse una), cada
+-- delete_* de acá abajo primero arma un snapshot COMPLETO en JSON (la fila
+-- borrada + todo lo que cuelga de ella en cascada — ver _mover_a_papelera y
+-- los delete_* de más abajo) y lo guarda acá, y RECIÉN DESPUÉS hace el
+-- DELETE de verdad. Así ninguna consulta existente se entera de que esto
+-- existe, y restaurar_papelera() vuelve a INSERTar esas mismas filas con
+-- sus ids originales (AUTOINCREMENT en SQLite/Turso nunca reusa un id ya
+-- usado, así que no hay conflicto ni hace falta remapear ninguna FK).
+CREATE TABLE IF NOT EXISTS papelera (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    tipo TEXT NOT NULL,
+    titulo TEXT,
+    datos TEXT NOT NULL,
+    eliminado_en TEXT DEFAULT (datetime('now','localtime')),
+    eliminado_por TEXT
+);
+
 CREATE INDEX IF NOT EXISTS idx_activity_contact ON activity_log(contact_id);
 CREATE INDEX IF NOT EXISTS idx_importacion_log_importacion ON importacion_log(importacion_id);
 CREATE INDEX IF NOT EXISTS idx_cotizaciones_cliente ON cotizaciones(cliente_id);
 CREATE INDEX IF NOT EXISTS idx_importaciones_cliente ON importaciones(cliente_id);
 CREATE INDEX IF NOT EXISTS idx_cotizacion_productos_cot ON cotizacion_productos(cotizacion_id);
 CREATE INDEX IF NOT EXISTS idx_cotizacion_gastos_cot ON cotizacion_gastos(cotizacion_id);
+CREATE INDEX IF NOT EXISTS idx_papelera_eliminado_en ON papelera(eliminado_en);
 
 CREATE TABLE IF NOT EXISTS usuarios (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -711,13 +735,206 @@ def _migrar_columnas_faltantes(conn):
                 conn.execute(f"ALTER TABLE {tabla} ADD COLUMN {columna} {tipo}")
 
 
+PAPELERA_DIAS_RETENCION = 30
+
+
+def _purgar_papelera(conn):
+    """Autoeliminación a los 30 días (pedido de Tom) — no hay ningún cron
+    server-side posible acá (Streamlit Community Cloud no lo ofrece, y el
+    proceso ni siquiera queda corriendo todo el tiempo), así que se chequea
+    en cada arranque, mismo criterio que _migrar_columnas_faltantes: barato
+    de más (una sola query) y suficiente en la práctica — si la app no
+    arranca durante más de 30 días nadie la está usando igual."""
+    conn.execute(
+        f"DELETE FROM papelera WHERE eliminado_en < datetime('now','localtime','-{PAPELERA_DIAS_RETENCION} days')"
+    )
+
+
 def init_db():
     conn = get_connection()
     conn.executescript(SCHEMA)
     _migrar_columnas_faltantes(conn)
+    _purgar_papelera(conn)
     for k, v in SETTINGS_DEFAULTS.items():
         conn.execute("INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)", (k, v))
     conn.commit()
+    conn.close()
+
+
+# ---------- Papelera de reciclaje ----------
+# Ver el comentario de la tabla `papelera` en SCHEMA para la idea general
+# (snapshot JSON + hard delete real, en vez de una columna eliminado_en por
+# tabla). Todo lo que sigue hasta "---------- Clientes ----------" son los
+# helpers genéricos que usan los delete_* de cada sección de más abajo.
+
+def _fila_a_dict_json_seguro(fila):
+    """dict(row) tal cual, salvo columnas BLOB (ej. 'contenido' de un
+    documento): json.dumps no sabe serializar bytes, así que quedan
+    envueltas en un marcador propio que _restaurar_blobs revierte."""
+    resultado = {}
+    for k, v in dict(fila).items():
+        if isinstance(v, (bytes, bytearray)):
+            resultado[k] = {"__blob_b64__": base64.b64encode(bytes(v)).decode("ascii")}
+        else:
+            resultado[k] = v
+    return resultado
+
+
+def _restaurar_blobs(obj):
+    """Inverso de _fila_a_dict_json_seguro, recursivo — un snapshot de
+    cliente/importación trae listas de documentos anidadas 2-3 niveles
+    adentro, así que no alcanza con mirar solo el nivel superior."""
+    if isinstance(obj, dict):
+        if set(obj.keys()) == {"__blob_b64__"}:
+            return base64.b64decode(obj["__blob_b64__"])
+        return {k: _restaurar_blobs(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_restaurar_blobs(v) for v in obj]
+    return obj
+
+
+def _mover_a_papelera(conn, tipo, titulo, snapshot: dict, autor=""):
+    conn.execute(
+        "INSERT INTO papelera (tipo, titulo, datos, eliminado_por) VALUES (?,?,?,?)",
+        (tipo, titulo, json.dumps(snapshot), autor),
+    )
+
+
+def _insertar_fila_restaurada(conn, tabla, fila: dict):
+    """INSERT genérico que reusa el id original de la fila (columna 'id'
+    incluida a propósito, no autogenerada) — ver el comentario de la tabla
+    papelera en SCHEMA sobre por qué eso es seguro con AUTOINCREMENT."""
+    fila = _restaurar_blobs(fila)
+    columnas = list(fila.keys())
+    placeholders = ",".join("?" for _ in columnas)
+    conn.execute(
+        f"INSERT INTO {tabla} ({','.join(columnas)}) VALUES ({placeholders})",
+        [fila[c] for c in columnas],
+    )
+
+
+def list_papelera():
+    conn = get_connection()
+    rows = conn.execute("SELECT id, tipo, titulo, eliminado_en, eliminado_por FROM papelera ORDER BY eliminado_en DESC").fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def eliminar_definitivo_papelera(papelera_id):
+    """'Eliminar definitivamente' desde la Papelera — a diferencia de
+    restaurar_papelera, acá no hay vuelta atrás (ni backup automático:
+    esto YA es el backup de la eliminación original)."""
+    conn = get_connection()
+    conn.execute("DELETE FROM papelera WHERE id=?", (papelera_id,))
+    conn.commit()
+    conn.close()
+
+
+def vaciar_papelera():
+    conn = get_connection()
+    conn.execute("DELETE FROM papelera")
+    conn.commit()
+    conn.close()
+
+
+def _restaurar_cliente(conn, snapshot):
+    _insertar_fila_restaurada(conn, "clientes", snapshot["cliente"])
+    for doc in snapshot.get("cliente_documentos", []):
+        _insertar_fila_restaurada(conn, "cliente_documentos", doc)
+    for imp in snapshot.get("importaciones", []):
+        _insertar_fila_restaurada(conn, "importaciones", {k: v for k, v in imp.items() if not k.startswith("_")})
+        for doc in imp.get("_documentos", []):
+            _insertar_fila_restaurada(conn, "importacion_documentos", doc)
+        for nota in imp.get("_notas", []):
+            _insertar_fila_restaurada(conn, "importacion_log", nota)
+    # cotizaciones y contactos NO se habían borrado (ON DELETE SET NULL en
+    # vez de CASCADE — ver delete_cliente): re-vincularlos es re-poner el
+    # cliente_id que tenían, no volver a INSERTarlos.
+    cliente_id = snapshot["cliente"]["id"]
+    for cot_id in snapshot.get("cotizaciones_desvinculadas", []):
+        conn.execute("UPDATE cotizaciones SET cliente_id=? WHERE id=? AND cliente_id IS NULL", (cliente_id, cot_id))
+    for contacto_id in snapshot.get("contactos_desvinculados", []):
+        conn.execute("UPDATE contacts SET cliente_id=? WHERE id=? AND cliente_id IS NULL", (cliente_id, contacto_id))
+
+
+def _restaurar_cotizacion(conn, snapshot):
+    _insertar_fila_restaurada(conn, "cotizaciones", snapshot["cotizacion"])
+    for p in snapshot.get("productos", []):
+        _insertar_fila_restaurada(conn, "cotizacion_productos", p)
+    for g in snapshot.get("gastos", []):
+        _insertar_fila_restaurada(conn, "cotizacion_gastos", g)
+    for doc in snapshot.get("documentos", []):
+        _insertar_fila_restaurada(conn, "cotizacion_documentos", doc)
+    # importaciones que quedaron con cotizacion_id=NULL (SET NULL, no se
+    # borran) al borrar esta cotización — re-vincularlas.
+    cot_id = snapshot["cotizacion"]["id"]
+    for imp_id in snapshot.get("importaciones_desvinculadas", []):
+        conn.execute("UPDATE importaciones SET cotizacion_id=? WHERE id=? AND cotizacion_id IS NULL", (cot_id, imp_id))
+
+
+def _restaurar_importacion(conn, snapshot):
+    _insertar_fila_restaurada(conn, "importaciones", snapshot["importacion"])
+    for doc in snapshot.get("documentos", []):
+        _insertar_fila_restaurada(conn, "importacion_documentos", doc)
+    for nota in snapshot.get("notas", []):
+        _insertar_fila_restaurada(conn, "importacion_log", nota)
+
+
+def _restaurar_contacto(conn, snapshot):
+    _insertar_fila_restaurada(conn, "contacts", snapshot["contacto"])
+    for ev in snapshot.get("actividad", []):
+        _insertar_fila_restaurada(conn, "activity_log", ev)
+
+
+def _restaurar_documento(conn, snapshot):
+    _insertar_fila_restaurada(conn, "importacion_documentos", snapshot["documento"])
+
+
+def _restaurar_documento_cotizacion(conn, snapshot):
+    _insertar_fila_restaurada(conn, "cotizacion_documentos", snapshot["documento"])
+
+
+def _restaurar_documento_cliente(conn, snapshot):
+    _insertar_fila_restaurada(conn, "cliente_documentos", snapshot["documento"])
+
+
+def _restaurar_nota_importacion(conn, snapshot):
+    _insertar_fila_restaurada(conn, "importacion_log", snapshot["nota"])
+
+
+_RESTAURADORES = {
+    "cliente": _restaurar_cliente,
+    "cotizacion": _restaurar_cotizacion,
+    "importacion": _restaurar_importacion,
+    "contacto": _restaurar_contacto,
+    "documento_importacion": _restaurar_documento,
+    "documento_cotizacion": _restaurar_documento_cotizacion,
+    "documento_cliente": _restaurar_documento_cliente,
+    "nota_importacion": _restaurar_nota_importacion,
+}
+
+
+def restaurar_papelera(papelera_id):
+    """Trae de vuelta lo que se haya borrado, tal cual estaba (mismos ids,
+    mismos vínculos) — ver _RESTAURADORES arriba, uno por tipo. Si algo ya
+    no encaja (ej. se restaura una importación pero el cliente dueño se
+    borró de verdad y también se vació la papelera para ese cliente) la
+    FK del schema (foreign_keys=ON) va a rechazar el INSERT con un
+    DBError, que sube tal cual para que la UI lo muestre — no se garantiza
+    reconstruir vínculos rotos, esto es un piolín de seguridad, no un
+    sistema de versionado completo."""
+    conn = get_connection()
+    fila = conn.execute("SELECT * FROM papelera WHERE id=?", (papelera_id,)).fetchone()
+    if not fila:
+        conn.close()
+        return
+    tipo = fila["tipo"]
+    snapshot = json.loads(fila["datos"])
+    restaurador = _RESTAURADORES.get(tipo)
+    if restaurador:
+        restaurador(conn, snapshot)
+        conn.execute("DELETE FROM papelera WHERE id=?", (papelera_id,))
+        conn.commit()
     conn.close()
 
 
@@ -767,8 +984,49 @@ def update_cliente(cliente_id, nombre, cuit="", email="", telefono="", direccion
     conn.close()
 
 
-def delete_cliente(cliente_id):
+def delete_cliente(cliente_id, autor=""):
     conn = get_connection()
+    cliente = conn.execute("SELECT * FROM clientes WHERE id=?", (cliente_id,)).fetchone()
+    if not cliente:
+        conn.close()
+        return
+    cliente = _fila_a_dict_json_seguro(cliente)
+
+    importaciones = []
+    for imp in conn.execute("SELECT * FROM importaciones WHERE cliente_id=?", (cliente_id,)).fetchall():
+        imp_d = _fila_a_dict_json_seguro(imp)
+        imp_d["_documentos"] = [
+            _fila_a_dict_json_seguro(r) for r in
+            conn.execute("SELECT * FROM importacion_documentos WHERE importacion_id=?", (imp["id"],)).fetchall()
+        ]
+        imp_d["_notas"] = [
+            _fila_a_dict_json_seguro(r) for r in
+            conn.execute("SELECT * FROM importacion_log WHERE importacion_id=?", (imp["id"],)).fetchall()
+        ]
+        importaciones.append(imp_d)
+
+    cliente_documentos = [
+        _fila_a_dict_json_seguro(r) for r in
+        conn.execute("SELECT * FROM cliente_documentos WHERE cliente_id=?", (cliente_id,)).fetchall()
+    ]
+    # cotizaciones/contacts con este cliente_id NO se borran (ON DELETE SET
+    # NULL, no CASCADE) — se anota su id para poder re-vincularlos si se
+    # restaura, ver _restaurar_cliente.
+    cotizaciones_desvinculadas = [
+        r["id"] for r in conn.execute("SELECT id FROM cotizaciones WHERE cliente_id=?", (cliente_id,)).fetchall()
+    ]
+    contactos_desvinculados = [
+        r["id"] for r in conn.execute("SELECT id FROM contacts WHERE cliente_id=?", (cliente_id,)).fetchall()
+    ]
+
+    snapshot = {
+        "cliente": cliente,
+        "importaciones": importaciones,
+        "cliente_documentos": cliente_documentos,
+        "cotizaciones_desvinculadas": cotizaciones_desvinculadas,
+        "contactos_desvinculados": contactos_desvinculados,
+    }
+    _mover_a_papelera(conn, "cliente", cliente["nombre"], snapshot, autor)
     conn.execute("DELETE FROM clientes WHERE id=?", (cliente_id,))
     conn.commit()
     conn.close()
@@ -1008,8 +1266,35 @@ def set_estado_cotizacion(cot_id, estado):
     conn.close()
 
 
-def delete_cotizacion(cot_id):
+def delete_cotizacion(cot_id, autor=""):
     conn = get_connection()
+    cotizacion = conn.execute("SELECT * FROM cotizaciones WHERE id=?", (cot_id,)).fetchone()
+    if not cotizacion:
+        conn.close()
+        return
+    cotizacion = _fila_a_dict_json_seguro(cotizacion)
+    productos = [
+        _fila_a_dict_json_seguro(r) for r in
+        conn.execute("SELECT * FROM cotizacion_productos WHERE cotizacion_id=?", (cot_id,)).fetchall()
+    ]
+    gastos = [
+        _fila_a_dict_json_seguro(r) for r in
+        conn.execute("SELECT * FROM cotizacion_gastos WHERE cotizacion_id=?", (cot_id,)).fetchall()
+    ]
+    documentos = [
+        _fila_a_dict_json_seguro(r) for r in
+        conn.execute("SELECT * FROM cotizacion_documentos WHERE cotizacion_id=?", (cot_id,)).fetchall()
+    ]
+    # importaciones con esta cotizacion_id NO se borran (ON DELETE SET
+    # NULL) — se anotan para re-vincularlas si se restaura.
+    importaciones_desvinculadas = [
+        r["id"] for r in conn.execute("SELECT id FROM importaciones WHERE cotizacion_id=?", (cot_id,)).fetchall()
+    ]
+    snapshot = {
+        "cotizacion": cotizacion, "productos": productos, "gastos": gastos, "documentos": documentos,
+        "importaciones_desvinculadas": importaciones_desvinculadas,
+    }
+    _mover_a_papelera(conn, "cotizacion", cotizacion.get("numero"), snapshot, autor)
     conn.execute("DELETE FROM cotizaciones WHERE id=?", (cot_id,))
     conn.commit()
     conn.close()
@@ -1155,15 +1440,37 @@ def update_importacion_nota(nota_id, texto):
     conn.close()
 
 
-def delete_importacion_nota(nota_id):
+def delete_importacion_nota(nota_id, autor=""):
     conn = get_connection()
+    nota = conn.execute("SELECT * FROM importacion_log WHERE id=?", (nota_id,)).fetchone()
+    if not nota:
+        conn.close()
+        return
+    nota = _fila_a_dict_json_seguro(nota)
+    primera_linea = (nota.get("texto") or "").splitlines()[0] if nota.get("texto") else ""
+    _mover_a_papelera(conn, "nota_importacion", primera_linea[:80], {"nota": nota}, autor)
     conn.execute("DELETE FROM importacion_log WHERE id=?", (nota_id,))
     conn.commit()
     conn.close()
 
 
-def delete_importacion(imp_id):
+def delete_importacion(imp_id, autor=""):
     conn = get_connection()
+    importacion = conn.execute("SELECT * FROM importaciones WHERE id=?", (imp_id,)).fetchone()
+    if not importacion:
+        conn.close()
+        return
+    importacion = _fila_a_dict_json_seguro(importacion)
+    documentos = [
+        _fila_a_dict_json_seguro(r) for r in
+        conn.execute("SELECT * FROM importacion_documentos WHERE importacion_id=?", (imp_id,)).fetchall()
+    ]
+    notas = [
+        _fila_a_dict_json_seguro(r) for r in
+        conn.execute("SELECT * FROM importacion_log WHERE importacion_id=?", (imp_id,)).fetchall()
+    ]
+    snapshot = {"importacion": importacion, "documentos": documentos, "notas": notas}
+    _mover_a_papelera(conn, "importacion", importacion.get("numero"), snapshot, autor)
     conn.execute("DELETE FROM importaciones WHERE id=?", (imp_id,))
     conn.commit()
     conn.close()
@@ -1217,8 +1524,14 @@ def get_documento(doc_id):
     return dict(row) if row else None
 
 
-def delete_documento(doc_id):
+def delete_documento(doc_id, autor=""):
     conn = get_connection()
+    doc = conn.execute("SELECT * FROM importacion_documentos WHERE id=?", (doc_id,)).fetchone()
+    if not doc:
+        conn.close()
+        return
+    doc = _fila_a_dict_json_seguro(doc)
+    _mover_a_papelera(conn, "documento_importacion", doc.get("nombre_archivo"), {"documento": doc}, autor)
     conn.execute("DELETE FROM importacion_documentos WHERE id=?", (doc_id,))
     conn.commit()
     conn.close()
@@ -1279,8 +1592,14 @@ def get_documento_cotizacion(doc_id):
     return dict(row) if row else None
 
 
-def delete_documento_cotizacion(doc_id):
+def delete_documento_cotizacion(doc_id, autor=""):
     conn = get_connection()
+    doc = conn.execute("SELECT * FROM cotizacion_documentos WHERE id=?", (doc_id,)).fetchone()
+    if not doc:
+        conn.close()
+        return
+    doc = _fila_a_dict_json_seguro(doc)
+    _mover_a_papelera(conn, "documento_cotizacion", doc.get("nombre_archivo"), {"documento": doc}, autor)
     conn.execute("DELETE FROM cotizacion_documentos WHERE id=?", (doc_id,))
     conn.commit()
     conn.close()
@@ -1331,8 +1650,14 @@ def get_documento_cliente(doc_id):
     return dict(row) if row else None
 
 
-def delete_documento_cliente(doc_id):
+def delete_documento_cliente(doc_id, autor=""):
     conn = get_connection()
+    doc = conn.execute("SELECT * FROM cliente_documentos WHERE id=?", (doc_id,)).fetchone()
+    if not doc:
+        conn.close()
+        return
+    doc = _fila_a_dict_json_seguro(doc)
+    _mover_a_papelera(conn, "documento_cliente", doc.get("nombre_archivo"), {"documento": doc}, autor)
     conn.execute("DELETE FROM cliente_documentos WHERE id=?", (doc_id,))
     conn.commit()
     conn.close()
@@ -1427,8 +1752,19 @@ def update_contact(contact_id, nombre, empresa="", email="", whatsapp="", origen
     conn.close()
 
 
-def delete_contact(contact_id):
+def delete_contact(contact_id, autor=""):
     conn = get_connection()
+    contacto = conn.execute("SELECT * FROM contacts WHERE id=?", (contact_id,)).fetchone()
+    if not contacto:
+        conn.close()
+        return
+    contacto = _fila_a_dict_json_seguro(contacto)
+    actividad = [
+        _fila_a_dict_json_seguro(r) for r in
+        conn.execute("SELECT * FROM activity_log WHERE contact_id=?", (contact_id,)).fetchall()
+    ]
+    snapshot = {"contacto": contacto, "actividad": actividad}
+    _mover_a_papelera(conn, "contacto", contacto.get("nombre"), snapshot, autor)
     conn.execute("DELETE FROM contacts WHERE id=?", (contact_id,))
     conn.commit()
     conn.close()

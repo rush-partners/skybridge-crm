@@ -793,10 +793,13 @@ __SB_VARS__
         "➕ Cotizar"/"Ver ficha →"); "resultgroup_" son grupos de métricas de
         solo lectura (Resultado de la operación / Simulación de venta), sin
         botones. "actev_" son eventos de timeline (ficha de contacto CRM),
-        de solo lectura como "resultgroup_" pero sin métricas. */
+        de solo lectura como "resultgroup_" pero sin métricas. "papitem_" son
+        filas de la Papelera de reciclaje (Configuración): mismo trato de
+        lista que impfila_/cotfila_, con "Restaurar"/"Eliminar" en vez de
+        "Ver detalle →". */
         [class*="st-key-cardwrap_"], [class*="st-key-formrow_"], [class*="st-key-clientecard_"],
         [class*="st-key-resultgroup_"], [class*="st-key-cotfila_"], [class*="st-key-filacrm_"],
-        [class*="st-key-impfila_"], [class*="st-key-actev_"] {
+        [class*="st-key-impfila_"], [class*="st-key-actev_"], [class*="st-key-papitem_"] {
             background: var(--sb-surface) !important;
             border: 1px solid var(--sb-border) !important;
             border-left: 3px solid var(--sb-orange) !important;
@@ -850,14 +853,16 @@ __SB_VARS__
         íconos cuadrados alineados a la derecha en vez de un selector +
         botones de texto aparte debajo del listado — flex en el contenedor
         para que cada botón/download_button ocupe solo su propio ancho. */
-        [class*="st-key-cotfilaacciones_"] {
+        [class*="st-key-cotfilaacciones_"], [class*="st-key-notaimpacciones_"] {
             display: flex !important; flex-direction: row !important;
             justify-content: flex-end; align-items: center; gap: 6px;
         }
         [class*="st-key-cotfilaacciones_"] .stButton button,
-        [class*="st-key-cotfilaacciones_"] .stDownloadButton button {
-            width: 38px !important; min-width: 38px !important; height: 38px !important;
-            min-height: 38px !important; padding: 0 !important; border-radius: 6px !important;
+        [class*="st-key-cotfilaacciones_"] .stDownloadButton button,
+        [class*="st-key-notaimpacciones_"] .stButton button,
+        [class*="st-key-notaimpacciones_"] .stPopover button {
+            width: 34px !important; min-width: 34px !important; height: 34px !important;
+            min-height: 34px !important; padding: 0 !important; border-radius: 6px !important;
         }
         /* El wrapper de tooltip que agrega Streamlit cuando el botón lleva
         help= (stTooltipHoverTarget/stTooltipIcon) no debe angostar el
@@ -866,6 +871,67 @@ __SB_VARS__
         [class*="st-key-cotfilaacciones_"] .stTooltipIcon,
         [class*="st-key-cotfilaacciones_"] .stTooltipHoverTarget {
             width: 38px !important; height: 38px !important;
+        }
+        [class*="st-key-notaimpacciones_"] .stTooltipIcon,
+        [class*="st-key-notaimpacciones_"] .stTooltipHoverTarget {
+            width: 34px !important; height: 34px !important;
+        }
+        /* "papacciones_" (fila de la Papelera): dos botones de TEXTO
+        (Restaurar/Eliminar), no íconos cuadrados como cotfilaacciones_/
+        notaimpacciones_ — mismo criterio de "fila propia en flex" para que
+        no se apilen en viewports angostos, pero sin ancho fijo (el texto
+        no entra en 34px). */
+        [class*="st-key-papacciones_"] {
+            display: flex !important; flex-direction: row !important;
+            justify-content: flex-end !important; align-items: center !important;
+            gap: 8px !important; flex-wrap: nowrap !important;
+        }
+        [class*="st-key-papacciones_"] .stButton button {
+            height: 38px !important; border-radius: 6px !important; white-space: nowrap !important;
+        }
+
+        /* Timeline de seguimiento de una importación (_render_timeline_importacion):
+        Tom la vio "demasiado grande, no se lee como una cronología" — dos
+        problemas reales, no solo de gusto. (1) el header de cada nota
+        (fecha | editar | eliminar) usaba 3 st.columns; en pantallas
+        angostas Streamlit APILA las columnas en vez de mantenerlas en fila,
+        así que cada nota pasaba a ocupar 3-4 líneas completas (fecha, botón
+        editar de ancho completo, botón eliminar de ancho completo, texto) en
+        vez de una sola línea de encabezado — de ahí el tamaño. Se arregla iagual
+        que fichahdr_ más arriba: forzar flex-row en el stHorizontalBlock de
+        esta card puntual. (2) las cards no tenían ningún parentesco visual
+        entre sí (ni el filo naranja de cardwrap_/actev_, ni ninguna otra
+        señal) — se veían como una lista de cajas sueltas, no como una
+        secuencia. Se agrega un riel con un punto por nota (::before/::after)
+        a la izquierda de cada card, en vez de sumarla al grupo de cards con
+        filo naranja de arriba (ese filo ya cumple el mismo rol de "esto es
+        parte de una secuencia" que acá hace el riel — ponerlos juntos se
+        veía duplicado). */
+        [class*="st-key-notaimp_"] {
+            background: var(--sb-surface) !important;
+            border: 1px solid var(--sb-border) !important;
+            border-radius: 8px !important;
+            box-shadow: var(--sb-shadow-sm) !important;
+            position: relative !important;
+            margin: 0 0 10px 22px !important;
+            padding: 10px 14px !important;
+        }
+        [class*="st-key-notaimp_"]::before {
+            content: ""; position: absolute; left: -22px; top: 19px;
+            width: 9px; height: 9px; border-radius: 50%;
+            background: var(--sb-orange); box-shadow: 0 0 0 3px var(--sb-bg);
+        }
+        [class*="st-key-notaimp_"]::after {
+            content: ""; position: absolute; left: -18px; top: 28px; bottom: -18px;
+            width: 1px; background: var(--sb-border);
+        }
+        [class*="st-key-notaimp_"] > div[data-testid="stHorizontalBlock"] {
+            display: flex !important; flex-wrap: nowrap !important;
+            justify-content: space-between !important; align-items: center !important;
+            gap: 8px;
+        }
+        [class*="st-key-notaimp_"] [data-testid="stColumn"]:last-child {
+            width: auto !important; flex: 0 0 auto !important; min-width: 0 !important;
         }
         /* "Eliminar" en rojo al hover, para que se note que es la acción
         destructiva del grupo — el resto se queda con el gris neutro. Antes
@@ -882,7 +948,10 @@ __SB_VARS__
         [class*="st-key-gdel_"] button:hover,
         [class*="st-key-btndelcliente_"] button:hover,
         [class*="st-key-btndelcotizacion_"] button:hover,
-        [class*="st-key-btndelcontacto_"] button:hover {
+        [class*="st-key-btndelcontacto_"] button:hover,
+        [class*="st-key-delnotaimp_"] button:hover,
+        [class*="st-key-papdel_"] button:hover,
+        [class*="st-key-btn_vaciar_papelera"] button:hover {
             background: var(--sb-danger-bg) !important; border-color: var(--sb-danger) !important; color: var(--sb-danger) !important;
         }
         /* Confirmación "Sí, eliminar" de los diálogos de borrado: usaba
@@ -894,12 +963,16 @@ __SB_VARS__
         destructivos y se quedan con el naranja de siempre. */
         [class*="st-key-confirmdeldoc_"] button, [class*="st-key-confirmdelcliedoc_"] button,
         [class*="st-key-confirmimpdel_"] button, [class*="st-key-confirmclidel_"] button,
-        [class*="st-key-confirmardel_"] button, [class*="st-key-crmconfirmardel_"] button {
+        [class*="st-key-confirmardel_"] button, [class*="st-key-crmconfirmardel_"] button,
+        [class*="st-key-confirmnotaimp_"] button, [class*="st-key-confirmpapdel_"] button,
+        [class*="st-key-confirmvaciarpap"] button {
             background: var(--sb-danger) !important; border-color: var(--sb-danger) !important;
         }
         [class*="st-key-confirmdeldoc_"] button:hover, [class*="st-key-confirmdelcliedoc_"] button:hover,
         [class*="st-key-confirmimpdel_"] button:hover, [class*="st-key-confirmclidel_"] button:hover,
-        [class*="st-key-confirmardel_"] button:hover, [class*="st-key-crmconfirmardel_"] button:hover {
+        [class*="st-key-confirmardel_"] button:hover, [class*="st-key-crmconfirmardel_"] button:hover,
+        [class*="st-key-confirmnotaimp_"] button:hover, [class*="st-key-confirmpapdel_"] button:hover,
+        [class*="st-key-confirmvaciarpap"] button:hover {
             filter: brightness(0.9);
         }
 
@@ -959,6 +1032,63 @@ __SB_VARS__
             color: #fff !important;
         }
         [class*="st-key-impfila_"] .stButton button p { color: inherit !important; }
+
+        /* Fila de la Papelera de reciclaje: mismo padding que impfila_ (una
+        línea de detalle + fecha). El st.columns([4, 2.2]) info/acciones se
+        fuerza a fila (mismo motivo que fichahdr_/notaimp_ más arriba:
+        Streamlit apila st.columns solo en viewports angostos por defecto)
+        para que "Restaurar"/"Eliminar" queden al lado de la fecha en vez de
+        una fila completa cada uno. */
+        [class*="st-key-papitem_"] {
+            padding: 14px 20px !important;
+        }
+        /* Sin ">" (hijo directo): a diferencia de notaimp_/fichahdr_ (donde
+        el contenido de las 2 columnas es corto y nunca llega a ocupar el
+        ancho como para importar), acá el texto (título+fecha) y los 2
+        botones de texto ("Restaurar"/"Eliminar", más anchos que los íconos
+        cuadrados de notaimpacciones_) sí alcanzan a superar el ancho
+        disponible — y Streamlit envuelve el stHorizontalBlock real en un
+        wrapper propio, así que el selector con hijo directo nunca hace
+        match y el forzado a fila no se aplicaba. */
+        [class*="st-key-papitem_"] div[data-testid="stHorizontalBlock"] {
+            display: flex !important; flex-wrap: nowrap !important;
+            justify-content: space-between !important; align-items: center !important;
+            gap: 8px;
+        }
+        [class*="st-key-papitem_"] [data-testid="stColumn"]:last-child {
+            width: auto !important; flex: 0 0 auto !important; min-width: 0 !important;
+        }
+        /* La columna del texto (título+fecha) trae de Streamlit un
+        min-width: calc(100% - 24px) propio de su breakpoint angosto — es
+        justamente el mecanismo con el que Streamlit apila columnas abajo
+        de los 640px (pensado para flex-wrap: wrap). Con flex-wrap: nowrap
+        forzado arriba, ese min-width ya no apila: en cambio hace que la
+        fila entera se desborde y los botones queden cortados fuera de la
+        card. Achicarlo a 0 deja que el título se ajuste (wrap normal de
+        texto) en vez de forzar el ancho. */
+        [class*="st-key-papitem_"] [data-testid="stColumn"]:first-child {
+            min-width: 0 !important; flex: 1 1 auto !important;
+        }
+        /* En celular (~480px o menos) ya no alcanza ni achicando: un título
+        largo ("Comercial del Sur SRL") en una columna angosta se corta
+        letra por letra en vez de por palabra. Ahí se abandona la fila
+        única a propósito y se vuelve a 2 líneas (texto arriba, acciones
+        abajo) — deliberado y legible, no el bug original (3 filas propias
+        de ancho completo por CADA elemento suelto). */
+        @media (max-width: 480px) {
+            [class*="st-key-papitem_"] div[data-testid="stHorizontalBlock"] {
+                flex-wrap: wrap !important;
+            }
+            [class*="st-key-papitem_"] [data-testid="stColumn"]:first-child {
+                min-width: 100% !important; flex: 1 1 100% !important;
+            }
+            [class*="st-key-papitem_"] [data-testid="stColumn"]:last-child {
+                width: 100% !important; flex: 1 1 100% !important;
+            }
+            [class*="st-key-papacciones_"] {
+                justify-content: flex-start !important; margin-top: 6px;
+            }
+        }
 
         /* Botón "Nueva cotización": mismo naranja primario, pero más chico
         y con el radio/sombra al hover del resto de los CTA de la app (ej.
@@ -1631,7 +1761,8 @@ def _eliminar_documento(doc_id):
     # El contenido vive en la misma fila (columna 'contenido' en Turso), no
     # en disco — borrar la fila alcanza, no hay ningún archivo aparte que
     # limpiar.
-    db.delete_documento(doc_id)
+    autor = (st.session_state.get("usuario_autenticado") or {}).get("nombre", "")
+    db.delete_documento(doc_id, autor)
 
 
 # Fase 8 — documentos de cotización (invoice/Packing List que el cliente
@@ -1662,12 +1793,13 @@ def _guardar_archivos_subidos_cotizacion(cot_id, categoria, archivos, cliente_id
 
 
 def _eliminar_documento_cotizacion(doc_id):
-    db.delete_documento_cotizacion(doc_id)
+    autor = (st.session_state.get("usuario_autenticado") or {}).get("nombre", "")
+    db.delete_documento_cotizacion(doc_id, autor)
 
 
 @st.dialog("Eliminar documento")
 def _dialog_eliminar_documento_cotizacion(doc_id, nombre_archivo):
-    st.warning(f"¿Confirmás eliminar **{nombre_archivo}**? Esta acción no se puede deshacer.")
+    st.warning(f"¿Confirmás eliminar **{nombre_archivo}**? Queda en la Papelera de reciclaje por 30 días antes de irse para siempre.")
     c1, c2 = st.columns(2)
     if c1.button("Cancelar", use_container_width=True, key=f"cancelcotdocdel_{doc_id}"):
         st.rerun()
@@ -1745,12 +1877,13 @@ def _render_documentos_cotizacion(cot_id, cliente_id=None):
 
 
 def _eliminar_documento_cliente(doc_id):
-    db.delete_documento_cliente(doc_id)
+    autor = (st.session_state.get("usuario_autenticado") or {}).get("nombre", "")
+    db.delete_documento_cliente(doc_id, autor)
 
 
 @st.dialog("Eliminar documento")
 def _dialog_eliminar_documento(doc_id, nombre_archivo):
-    st.warning(f"¿Confirmás eliminar **{nombre_archivo}**? Esta acción no se puede deshacer.")
+    st.warning(f"¿Confirmás eliminar **{nombre_archivo}**? Queda en la Papelera de reciclaje por 30 días antes de irse para siempre.")
     c1, c2 = st.columns(2)
     if c1.button("Cancelar", use_container_width=True, key=f"canceldeldoc_{doc_id}"):
         st.rerun()
@@ -1764,7 +1897,7 @@ def _dialog_eliminar_documento(doc_id, nombre_archivo):
 
 @st.dialog("Eliminar documento")
 def _dialog_eliminar_documento_cliente(doc_id, nombre_archivo):
-    st.warning(f"¿Confirmás eliminar **{nombre_archivo}**? Esta acción no se puede deshacer.")
+    st.warning(f"¿Confirmás eliminar **{nombre_archivo}**? Queda en la Papelera de reciclaje por 30 días antes de irse para siempre.")
     c1, c2 = st.columns(2)
     if c1.button("Cancelar", use_container_width=True, key=f"canceldelcliedoc_{doc_id}"):
         st.rerun()
@@ -1779,16 +1912,17 @@ def _dialog_eliminar_documento_cliente(doc_id, nombre_archivo):
 @st.dialog("Eliminar importación")
 def _dialog_eliminar_importacion(imp_id, numero):
     st.warning(
-        f"¿Confirmás eliminar **{numero}**? Esta acción no se puede deshacer: se borran todos "
-        "sus documentos junto con la importación."
+        f"¿Confirmás eliminar **{numero}**? Se borran junto con ella todos sus documentos y notas "
+        "de seguimiento. Queda todo en la Papelera de reciclaje por 30 días antes de irse para siempre."
     )
     c1, c2 = st.columns(2)
     if c1.button("Cancelar", use_container_width=True, key=f"cancelimpdel_{imp_id}"):
         st.rerun()
     if c2.button("Sí, eliminar", type="primary", use_container_width=True, key=f"confirmimpdel_{imp_id}"):
         try:
+            autor = (st.session_state.get("usuario_autenticado") or {}).get("nombre", "")
             db.backup_antes_de_borrar("importacion")
-            db.delete_importacion(imp_id)
+            db.delete_importacion(imp_id, autor)
             _flash("Importación eliminada.", icon="🗑️")
         except db.DBError as e:
             _flash(f"No se pudo eliminar la importación: {e}", icon="❌")
@@ -1808,9 +1942,10 @@ def _dialog_eliminar_cliente(cliente_id, nombre):
     total_docs_imp = sum(db.contar_documentos(imp["id"]) for imp in importaciones_cli)
     total_docs_cliente = db.contar_documentos_cliente(cliente_id)
     st.warning(
-        f"¿Confirmás eliminar **{nombre}**? Esta acción no se puede deshacer, y también elimina "
-        f"de forma permanente sus {len(importaciones_cli)} importación(es) y "
-        f"{total_docs_imp + total_docs_cliente} documento(s) asociados.\n\n"
+        f"¿Confirmás eliminar **{nombre}**? También elimina junto con él sus "
+        f"{len(importaciones_cli)} importación(es) y "
+        f"{total_docs_imp + total_docs_cliente} documento(s) asociados — todo queda en la "
+        "Papelera de reciclaje por 30 días antes de irse para siempre.\n\n"
         "Las cotizaciones ya hechas para este cliente **no** se borran, pero quedan sin cliente "
         "vinculado. Si tiene un contacto de CRM vinculado, tampoco se borra: solo queda "
         "desvinculado del cliente."
@@ -1820,8 +1955,9 @@ def _dialog_eliminar_cliente(cliente_id, nombre):
         st.rerun()
     if c2.button("Sí, eliminar", type="primary", use_container_width=True, key=f"confirmclidel_{cliente_id}"):
         try:
+            autor = (st.session_state.get("usuario_autenticado") or {}).get("nombre", "")
             db.backup_antes_de_borrar("cliente")
-            db.delete_cliente(cliente_id)
+            db.delete_cliente(cliente_id, autor)
             st.session_state.cliente_seleccionado = None
             _flash(f"Cliente '{nombre}' eliminado.", icon="🗑️")
         except db.DBError as e:
@@ -2037,13 +2173,14 @@ def _render_detalle_final_importacion(imp, cotizacion):
 
 @st.dialog("Eliminar nota")
 def _dialog_eliminar_nota_importacion(nota_id):
-    st.warning("¿Confirmás eliminar esta nota de seguimiento? Esta acción no se puede deshacer.")
+    st.warning("¿Confirmás eliminar esta nota de seguimiento? Queda en la Papelera de reciclaje por 30 días antes de irse para siempre.")
     c1, c2 = st.columns(2)
     if c1.button("Cancelar", use_container_width=True, key=f"cancelnotaimp_{nota_id}"):
         st.rerun()
     if c2.button("Sí, eliminar", type="primary", use_container_width=True, key=f"confirmnotaimp_{nota_id}"):
         try:
-            db.delete_importacion_nota(nota_id)
+            autor = (st.session_state.get("usuario_autenticado") or {}).get("nombre", "")
+            db.delete_importacion_nota(nota_id, autor)
         except db.DBError as e:
             _flash(f"No se pudo eliminar la nota: {e}", icon="❌")
         st.rerun()
@@ -2058,7 +2195,10 @@ def _render_timeline_importacion(imp_id):
     viejo campo 'notas_transito', reemplazado por esto)."""
     autor = (st.session_state.get("usuario_autenticado") or {}).get("nombre", "")
     with st.form(f"form_nota_imp_{imp_id}", clear_on_submit=True):
-        texto_nota = st.text_area("Nueva nota", key=f"notaimp_txt_{imp_id}")
+        # height=70 (mínimo que admite Streamlit): el alto por defecto
+        # (~140px) empujaba toda la bitácora de abajo bien lejos, antes de
+        # que se llegara a ver una sola nota vieja.
+        texto_nota = st.text_area("Nueva nota", key=f"notaimp_txt_{imp_id}", height=70)
         if st.form_submit_button("➕ Agregar nota"):
             if texto_nota.strip():
                 db.add_importacion_nota(imp_id, texto_nota.strip(), autor)
@@ -2066,27 +2206,38 @@ def _render_timeline_importacion(imp_id):
     notas = db.list_importacion_notas(imp_id)
     if not notas:
         st.caption("Sin notas de seguimiento todavía.")
+    # 2 columnas, no 3: fecha/autor + UN contenedor de acciones (editar +
+    # eliminar juntos, mismo patrón que cotfilaacciones_ en el historial del
+    # Cotizador) — con 3 columnas sueltas, en pantalla angosta Streamlit las
+    # apilaba en vez de mantenerlas en fila y cada nota pasaba a ocupar 4
+    # líneas completas (ver comentario en el CSS de notaimp_/notaimpacciones_
+    # más arriba). El div del header además se fuerza a flex-row por CSS,
+    # como refuerzo para que nunca vuelva a apilarse.
     for n in notas:
         with st.container(border=True, key=f"notaimp_{n['id']}"):
-            c1, c2, c3 = st.columns([5, 0.6, 0.6])
+            c1, c2 = st.columns([5, 1.4])
             autor_txt = f" · {html.escape(n['autor'])}" if n.get("autor") else ""
             c1.markdown(
                 f'<div style="font-size:12px; color:var(--sb-text-secondary);">'
                 f'{_fmt_fecha_hora(n["fecha"])}{autor_txt}</div>',
                 unsafe_allow_html=True,
             )
-            # icon=, no el emoji "✏️" como label — mismo criterio que el
-            # popover de renombrar documentos (ver más arriba en este archivo).
-            with c2.popover("", icon=":material/edit:", use_container_width=True, help="Editar nota"):
-                nuevo_texto = st.text_area("Texto de la nota", value=n["texto"] or "", key=f"editnotaimp_{n['id']}")
-                if st.button("💾 Guardar", key=f"editnotaimpbtn_{n['id']}"):
-                    if nuevo_texto.strip():
-                        db.update_importacion_nota(n["id"], nuevo_texto.strip())
-                        st.rerun()
-                    else:
-                        st.error("La nota no puede quedar vacía.")
-            if c3.button("", icon=":material/delete:", use_container_width=True, help="Eliminar nota", key=f"delnotaimp_{n['id']}"):
-                _dialog_eliminar_nota_importacion(n["id"])
+            with c2:
+                with st.container(key=f"notaimpacciones_{n['id']}"):
+                    # icon=, no el emoji "✏️" como label — mismo criterio que
+                    # el popover de renombrar documentos (ver más arriba).
+                    with st.popover("", icon=":material/edit:", help="Editar nota"):
+                        nuevo_texto = st.text_area(
+                            "Texto de la nota", value=n["texto"] or "", key=f"editnotaimp_{n['id']}",
+                        )
+                        if st.button("💾 Guardar", key=f"editnotaimpbtn_{n['id']}"):
+                            if nuevo_texto.strip():
+                                db.update_importacion_nota(n["id"], nuevo_texto.strip())
+                                st.rerun()
+                            else:
+                                st.error("La nota no puede quedar vacía.")
+                    if st.button("", icon=":material/delete:", help="Eliminar nota", key=f"delnotaimp_{n['id']}"):
+                        _dialog_eliminar_nota_importacion(n["id"])
             st.markdown(html.escape(n["texto"] or "").replace("\n", "<br>"), unsafe_allow_html=True)
 
 
@@ -4122,6 +4273,48 @@ def _dialog_confirmar_restaurar_backup():
         st.rerun()
 
 
+_PAPELERA_TIPO_INFO = {
+    "cliente": ("👤", "Cliente"),
+    "cotizacion": ("🧮", "Cotización"),
+    "importacion": ("📦", "Importación"),
+    "nota_importacion": ("📝", "Nota de importación"),
+    "documento_importacion": ("📄", "Documento de importación"),
+    "documento_cotizacion": ("📄", "Documento de cotización"),
+    "documento_cliente": ("📄", "Documento de cliente"),
+    "contacto": ("🧭", "Contacto CRM"),
+}
+
+
+@st.dialog("Eliminar definitivamente")
+def _dialog_eliminar_definitivo_papelera(papelera_id, titulo):
+    st.warning(
+        f"¿Confirmás eliminar **{titulo}** definitivamente de la papelera? Esta vez no "
+        "hay vuelta atrás: ya no se va a poder restaurar después de esto."
+    )
+    c1, c2 = st.columns(2)
+    if c1.button("Cancelar", use_container_width=True, key=f"cancelpapdel_{papelera_id}"):
+        st.rerun()
+    if c2.button("Sí, eliminar", type="primary", use_container_width=True, key=f"confirmpapdel_{papelera_id}"):
+        db.eliminar_definitivo_papelera(papelera_id)
+        _flash(f"'{titulo}' eliminado definitivamente.", icon="🗑️")
+        st.rerun()
+
+
+@st.dialog("Vaciar papelera")
+def _dialog_vaciar_papelera():
+    st.warning(
+        "¿Confirmás vaciar la papelera? Se elimina definitivamente TODO lo que tiene "
+        "adentro ahora mismo — esta acción no se puede deshacer."
+    )
+    c1, c2 = st.columns(2)
+    if c1.button("Cancelar", use_container_width=True, key="cancelvaciarpap"):
+        st.rerun()
+    if c2.button("Sí, vaciar", type="primary", use_container_width=True, key="confirmvaciarpap"):
+        db.vaciar_papelera()
+        _flash("Papelera vaciada.", icon="🗑️")
+        st.rerun()
+
+
 def _render_configuracion():
     with st.container(border=True, key="cardwrap_config_migracion"):
         st.markdown("#### 🔁 Migración retroactiva de contactos CRM")
@@ -4214,6 +4407,57 @@ def _render_configuracion():
     if "_restaurar_backup_bytes" in st.session_state:
         _dialog_confirmar_restaurar_backup()
 
+    with st.container(border=True, key="cardwrap_config_papelera"):
+        st.markdown("#### 🗑️ Papelera de reciclaje")
+        st.caption(
+            "Todo lo que eliminás en la app (clientes, cotizaciones, importaciones, "
+            "contactos de CRM, documentos y notas) pasa por acá antes de irse para "
+            "siempre: se puede restaurar hasta 30 días después de eliminado. Pasado ese "
+            "plazo se borra solo."
+        )
+        items = db.list_papelera()
+        if not items:
+            st.caption("La papelera está vacía.")
+        else:
+            tipos_presentes = sorted({it["tipo"] for it in items})
+            filtro = st.selectbox(
+                "Filtrar por tipo",
+                ["todos"] + tipos_presentes,
+                format_func=lambda t: "Todos" if t == "todos" else (
+                    f"{_PAPELERA_TIPO_INFO.get(t, ('🗑️', t))[0]} {_PAPELERA_TIPO_INFO.get(t, ('🗑️', t))[1]}"
+                ),
+                key="papelera_filtro_tipo",
+            )
+            visibles = [it for it in items if filtro == "todos" or it["tipo"] == filtro]
+            if not visibles:
+                st.caption("Nada de ese tipo en la papelera.")
+            for it in visibles:
+                icono, label = _PAPELERA_TIPO_INFO.get(it["tipo"], ("🗑️", it["tipo"]))
+                titulo = it["titulo"] or "(sin título)"
+                autor_txt = f" · eliminado por {html.escape(it['eliminado_por'])}" if it.get("eliminado_por") else ""
+                with st.container(border=True, key=f"papitem_{it['id']}"):
+                    c1, c2 = st.columns([4, 2.2])
+                    c1.markdown(
+                        f'<div>{icono} <strong>{html.escape(label)}</strong> — {html.escape(titulo)}</div>'
+                        f'<div style="font-size:12px; color:var(--sb-text-secondary);">'
+                        f'{_fmt_fecha_hora(it["eliminado_en"])}{autor_txt}</div>',
+                        unsafe_allow_html=True,
+                    )
+                    with c2:
+                        with st.container(key=f"papacciones_{it['id']}"):
+                            if st.button("♻️ Restaurar", key=f"paprestore_{it['id']}"):
+                                try:
+                                    db.restaurar_papelera(it["id"])
+                                    _flash(f"'{titulo}' restaurado.", icon="♻️")
+                                except db.DBError as e:
+                                    _flash(f"No se pudo restaurar (¿el vínculo original ya no existe?): {e}", icon="❌")
+                                st.rerun()
+                            if st.button("🗑️ Eliminar", key=f"papdel_{it['id']}"):
+                                _dialog_eliminar_definitivo_papelera(it["id"], titulo)
+            st.divider()
+            if st.button("🗑️ Vaciar papelera", key="btn_vaciar_papelera"):
+                _dialog_vaciar_papelera()
+
 
 def vista_panel_control():
     st.header("📊 Panel de Control")
@@ -4296,8 +4540,9 @@ def _eliminar_cotizacion_historial(cid):
     # cotización borrada es la que estaba abierta en el editor, además de
     # limpiar su estado hay que rebotar a "historial" — si no, la pantalla
     # se queda intentando dibujar el editor de una cotización que ya no existe.
+    autor = (st.session_state.get("usuario_autenticado") or {}).get("nombre", "")
     db.backup_antes_de_borrar("cotizacion")
-    db.delete_cotizacion(cid)
+    db.delete_cotizacion(cid, autor)
     if st.session_state.get("cot_cab", {}).get("id") == cid:
         for k in ["cot_cab", "cot_productos", "cot_gastos"]:
             st.session_state.pop(k, None)
@@ -4334,7 +4579,7 @@ def _dialog_confirmar_aprobada(cot_id, cliente_id, nombre_cliente):
 
 @st.dialog("Eliminar cotización")
 def _dialog_eliminar_cotizacion(cid, numero):
-    st.warning(f"¿Confirmás eliminar **{numero}**? Esta acción no se puede deshacer.")
+    st.warning(f"¿Confirmás eliminar **{numero}**? Queda en la Papelera de reciclaje por 30 días antes de irse para siempre.")
     c1, c2 = st.columns(2)
     if c1.button("Cancelar", use_container_width=True, key=f"cancelardel_{cid}"):
         st.rerun()
@@ -4771,12 +5016,13 @@ def _actualizar_etapa_contacto(contact_id, key_selectbox):
 
 @st.dialog("Eliminar contacto")
 def _dialog_eliminar_contacto_crm(contact_id, nombre):
-    st.warning(f"¿Confirmás eliminar a **{nombre}**? Esta acción no se puede deshacer.")
+    st.warning(f"¿Confirmás eliminar a **{nombre}**? Queda en la Papelera de reciclaje por 30 días antes de irse para siempre.")
     c1, c2 = st.columns(2)
     if c1.button("Cancelar", use_container_width=True, key=f"crmcancelardel_{contact_id}"):
         st.rerun()
     if c2.button("Sí, eliminar", type="primary", use_container_width=True, key=f"crmconfirmardel_{contact_id}"):
-        db.delete_contact(contact_id)
+        autor = (st.session_state.get("usuario_autenticado") or {}).get("nombre", "")
+        db.delete_contact(contact_id, autor)
         if st.session_state.get("contacto_seleccionado") == contact_id:
             st.session_state.contacto_seleccionado = None
         _flash(f"Contacto '{nombre}' eliminado.", icon="🗑️")
@@ -5438,7 +5684,8 @@ def _render_ficha_contacto(c):
                         st.success("Actualizado.")
                         st.rerun()
                 if b2.form_submit_button("🗑️ Eliminar contacto", key=f"btndelcontacto_{c['id']}"):
-                    db.delete_contact(c["id"])
+                    autor = (st.session_state.get("usuario_autenticado") or {}).get("nombre", "")
+                    db.delete_contact(c["id"], autor)
                     st.session_state.contacto_seleccionado = None
                     st.warning("Contacto eliminado.")
                     st.rerun()
