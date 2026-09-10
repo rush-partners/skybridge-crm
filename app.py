@@ -796,10 +796,12 @@ __SB_VARS__
         de solo lectura como "resultgroup_" pero sin métricas. "papitem_" son
         filas de la Papelera de reciclaje (Configuración): mismo trato de
         lista que impfila_/cotfila_, con "Restaurar"/"Eliminar" en vez de
-        "Ver detalle →". */
+        "Ver detalle →". "sesitem_" son filas de Sesiones activas
+        (Configuración), mismo trato con un solo botón ("Cerrar sesión"). */
         [class*="st-key-cardwrap_"], [class*="st-key-formrow_"], [class*="st-key-clientecard_"],
         [class*="st-key-resultgroup_"], [class*="st-key-cotfila_"], [class*="st-key-filacrm_"],
-        [class*="st-key-impfila_"], [class*="st-key-actev_"], [class*="st-key-papitem_"] {
+        [class*="st-key-impfila_"], [class*="st-key-actev_"], [class*="st-key-papitem_"],
+        [class*="st-key-sesitem_"] {
             background: var(--sb-surface) !important;
             border: 1px solid var(--sb-border) !important;
             border-left: 3px solid var(--sb-orange) !important;
@@ -1039,23 +1041,26 @@ __SB_VARS__
         Streamlit apila st.columns solo en viewports angostos por defecto)
         para que "Restaurar"/"Eliminar" queden al lado de la fecha en vez de
         una fila completa cada uno. */
-        [class*="st-key-papitem_"] {
+        [class*="st-key-papitem_"], [class*="st-key-sesitem_"] {
             padding: 14px 20px !important;
         }
         /* Sin ">" (hijo directo): a diferencia de notaimp_/fichahdr_ (donde
         el contenido de las 2 columnas es corto y nunca llega a ocupar el
-        ancho como para importar), acá el texto (título+fecha) y los 2
-        botones de texto ("Restaurar"/"Eliminar", más anchos que los íconos
-        cuadrados de notaimpacciones_) sí alcanzan a superar el ancho
-        disponible — y Streamlit envuelve el stHorizontalBlock real en un
-        wrapper propio, así que el selector con hijo directo nunca hace
-        match y el forzado a fila no se aplicaba. */
-        [class*="st-key-papitem_"] div[data-testid="stHorizontalBlock"] {
+        ancho como para importar), acá el texto (título+fecha) y los
+        botones de texto ("Restaurar"/"Eliminar"/"Cerrar sesión", más
+        anchos que los íconos cuadrados de notaimpacciones_) sí alcanzan a
+        superar el ancho disponible — y Streamlit envuelve el
+        stHorizontalBlock real en un wrapper propio, así que el selector
+        con hijo directo nunca hace match y el forzado a fila no se
+        aplicaba. */
+        [class*="st-key-papitem_"] div[data-testid="stHorizontalBlock"],
+        [class*="st-key-sesitem_"] div[data-testid="stHorizontalBlock"] {
             display: flex !important; flex-wrap: nowrap !important;
             justify-content: space-between !important; align-items: center !important;
             gap: 8px;
         }
-        [class*="st-key-papitem_"] [data-testid="stColumn"]:last-child {
+        [class*="st-key-papitem_"] [data-testid="stColumn"]:last-child,
+        [class*="st-key-sesitem_"] [data-testid="stColumn"]:last-child {
             width: auto !important; flex: 0 0 auto !important; min-width: 0 !important;
         }
         /* La columna del texto (título+fecha) trae de Streamlit un
@@ -1066,7 +1071,8 @@ __SB_VARS__
         fila entera se desborde y los botones queden cortados fuera de la
         card. Achicarlo a 0 deja que el título se ajuste (wrap normal de
         texto) en vez de forzar el ancho. */
-        [class*="st-key-papitem_"] [data-testid="stColumn"]:first-child {
+        [class*="st-key-papitem_"] [data-testid="stColumn"]:first-child,
+        [class*="st-key-sesitem_"] [data-testid="stColumn"]:first-child {
             min-width: 0 !important; flex: 1 1 auto !important;
         }
         /* En celular (~480px o menos) ya no alcanza ni achicando: un título
@@ -1076,13 +1082,16 @@ __SB_VARS__
         abajo) — deliberado y legible, no el bug original (3 filas propias
         de ancho completo por CADA elemento suelto). */
         @media (max-width: 480px) {
-            [class*="st-key-papitem_"] div[data-testid="stHorizontalBlock"] {
+            [class*="st-key-papitem_"] div[data-testid="stHorizontalBlock"],
+            [class*="st-key-sesitem_"] div[data-testid="stHorizontalBlock"] {
                 flex-wrap: wrap !important;
             }
-            [class*="st-key-papitem_"] [data-testid="stColumn"]:first-child {
+            [class*="st-key-papitem_"] [data-testid="stColumn"]:first-child,
+            [class*="st-key-sesitem_"] [data-testid="stColumn"]:first-child {
                 min-width: 100% !important; flex: 1 1 100% !important;
             }
-            [class*="st-key-papitem_"] [data-testid="stColumn"]:last-child {
+            [class*="st-key-papitem_"] [data-testid="stColumn"]:last-child,
+            [class*="st-key-sesitem_"] [data-testid="stColumn"]:last-child {
                 width: 100% !important; flex: 1 1 100% !important;
             }
             [class*="st-key-papacciones_"] {
@@ -1605,22 +1614,22 @@ def pct(v):
         return "0.00%"
 
 
-# Token de sesión → usuario, en memoria del proceso (no en session_state:
-# eso se resetea con cada F5, es justo lo que este mecanismo evita). Streamlit
-# vuelve a ejecutar TODO el script de punta a punta en cada rerun, así que un
-# simple `= {}` a nivel de módulo se reinicializaría (perdería todos los
-# tokens) en cada click, no solo al reiniciar el server — por eso el diccionario
-# vive adentro de un @st.cache_resource: ese sí se crea una sola vez y
-# persiste mientras el servidor siga corriendo, compartido por todas las
-# sesiones/usuarios del proceso. Sobrevive a un refresco de página, no a un
-# redeploy/reinicio del server — ahí sí hay que volver a loguearse una vez
-# (igual que pasaba siempre antes de esto).
-_SESION_DURACION = timedelta(days=30)
-
-
-@st.cache_resource
-def _sesiones_activas():
-    return {}
+# Token de sesión → usuario, ahora en la tabla `sesiones` (Turso), no en
+# memoria del proceso como antes (ver db.py): así Configuración puede
+# listar qué sesiones hay abiertas y cerrarle una a alguien de verdad —
+# con el dict en memoria de antes, ni se podían ver, ni cerrarlas
+# alcanzaba con desactivar al usuario (el token ya emitido seguía
+# sirviendo hasta expirar solo, a los 30 días).
+#
+# Revalidar contra la base en CADA rerun (cada click de toda la app) sería
+# una consulta a Turso de más por click — de más porque, una vez adentro,
+# lo normal es que la sesión siga siendo válida. Por eso solo se
+# revalida cada _REVALIDACION_INTERVALO: para el uso normal es
+# transparente, y "Cerrar sesión" desde Configuración tarda como mucho
+# ese ratito en surtir efecto en el navegador de la persona afectada (en
+# su próximo click — Streamlit no empuja nada al cliente sin que el
+# usuario haga algo).
+_REVALIDACION_INTERVALO = timedelta(minutes=3)
 
 
 def _restaurar_sesion_desde_token():
@@ -1630,12 +1639,37 @@ def _restaurar_sesion_desde_token():
     token = st.query_params.get("sesion")
     if not token:
         return
-    sesiones = _sesiones_activas()
-    sesion = sesiones.get(token)
-    if not sesion or sesion["expira"] < datetime.now():
-        sesiones.pop(token, None)
+    usuario = db.validar_sesion(token)
+    if not usuario:
         return
-    st.session_state.usuario_autenticado = sesion["usuario"]
+    st.session_state.usuario_autenticado = usuario
+    st.session_state["_token_sesion"] = token
+    st.session_state["_sesion_verificada_en"] = datetime.now()
+    db.tocar_sesion(token)
+
+
+def _revalidar_sesion_si_corresponde():
+    """Sesión ya restaurada en ESTE session_state (no hace falta volver a
+    pasar por el token de la URL en cada rerun, Streamlit lo conserva
+    solo) — pero igual hay que chequear cada tanto que nadie la haya
+    cerrado desde Configuración, o desactivado al usuario, mientras
+    tanto. Ver _REVALIDACION_INTERVALO arriba."""
+    token = st.session_state.get("_token_sesion")
+    if not token:
+        return
+    verificada_en = st.session_state.get("_sesion_verificada_en")
+    if verificada_en and datetime.now() - verificada_en < _REVALIDACION_INTERVALO:
+        return
+    usuario = db.validar_sesion(token)
+    if not usuario:
+        st.session_state.usuario_autenticado = None
+        st.session_state.pop("_token_sesion", None)
+        if "sesion" in st.query_params:
+            del st.query_params["sesion"]
+        return
+    st.session_state.usuario_autenticado = usuario
+    st.session_state["_sesion_verificada_en"] = datetime.now()
+    db.tocar_sesion(token)
 
 
 def _gate_login():
@@ -1647,6 +1681,8 @@ def _gate_login():
     para los siguientes."""
     if not st.session_state.get("usuario_autenticado"):
         _restaurar_sesion_desde_token()
+    else:
+        _revalidar_sesion_si_corresponde()
     if st.session_state.get("usuario_autenticado"):
         return
 
@@ -1687,11 +1723,10 @@ def _gate_login():
                     if st.form_submit_button("Ingresar", use_container_width=True):
                         usuario, error = db.verificar_login(username, password)
                         if usuario:
-                            token = secrets.token_urlsafe(32)
-                            _sesiones_activas()[token] = {
-                                "usuario": usuario, "expira": datetime.now() + _SESION_DURACION,
-                            }
+                            token = db.crear_sesion(usuario["id"])
                             st.session_state.usuario_autenticado = usuario
+                            st.session_state["_token_sesion"] = token
+                            st.session_state["_sesion_verificada_en"] = datetime.now()
                             st.query_params["sesion"] = token
                             st.rerun()
                         else:
@@ -4365,6 +4400,40 @@ def _render_configuracion():
                 else:
                     st.error("Completá usuario, nombre y contraseña.")
 
+    with st.container(border=True, key="cardwrap_config_sesiones"):
+        st.markdown("#### 🔒 Sesiones activas")
+        st.caption(
+            "El login queda 'recordado' 30 días salvo que cierres sesión. El 'último visto' se "
+            "actualiza cada pocos minutos de uso real — si alguien cerró la pestaña sin salir, "
+            "puede tardar en reflejarse acá. Cerrar una sesión tampoco es al toque del otro lado: "
+            "surte efecto recién en el próximo click de esa persona, no de forma instantánea."
+        )
+        token_propio = st.session_state.get("_token_sesion")
+        sesiones = db.list_sesiones_activas()
+        if not sesiones:
+            st.caption("No hay sesiones abiertas ahora mismo.")
+        else:
+            for s in sesiones:
+                es_esta = s["token"] == token_propio
+                with st.container(border=True, key=f"sesitem_{s['id']}"):
+                    c1, c2 = st.columns([4, 1.8])
+                    vos_txt = " · **esta sesión (vos)**" if es_esta else ""
+                    c1.markdown(
+                        f"**{html.escape(s['nombre'])}** (`{html.escape(s['username'])}`){vos_txt}<br>"
+                        f'<span style="font-size:12px; color:var(--sb-text-secondary);">'
+                        f'Último visto: {_fmt_fecha_hora(s["ultimo_visto"])} · desde el '
+                        f'{_fmt_fecha_hora(s["creado_en"])}</span>',
+                        unsafe_allow_html=True,
+                    )
+                    # Sin botón para la sesión propia: cerrarla desde acá dejaría a
+                    # Tom afuera de su propia pantalla de Configuración sin
+                    # querer — para eso ya está "Cerrar sesión" en la barra lateral.
+                    if not es_esta:
+                        if c2.button("🔒 Cerrar sesión", key=f"cerrarsesion_{s['id']}"):
+                            db.cerrar_sesion(s["id"])
+                            _flash(f"Sesión de '{s['nombre']}' cerrada.", icon="🔒")
+                            st.rerun()
+
     with st.container(border=True, key="cardwrap_config_backup"):
         st.markdown("#### 💾 Backup")
         # exportar_backup_sqlite() hace un SELECT * por cada tabla de la base
@@ -6170,10 +6239,11 @@ def main():
             "", icon=":material/logout:", key="sidebar_logout",
             help="Cerrar sesión", use_container_width=True,
         ):
-            _sesiones_activas().pop(st.query_params.get("sesion"), None)
+            db.cerrar_sesion_por_token(st.session_state.get("_token_sesion") or st.query_params.get("sesion"))
             if "sesion" in st.query_params:
                 del st.query_params["sesion"]
             st.session_state.usuario_autenticado = None
+            st.session_state.pop("_token_sesion", None)
             st.rerun()
 
     _mostrar_flash()

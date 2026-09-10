@@ -8,6 +8,7 @@ import base64
 import http.client
 import json
 import os
+import secrets
 import sqlite3
 import tempfile
 import threading
@@ -406,6 +407,26 @@ CREATE TABLE IF NOT EXISTS usuarios (
     activo INTEGER DEFAULT 1,
     creado_en TEXT DEFAULT (datetime('now','localtime'))
 );
+
+-- "Recordarme 30 días" (?sesion=<token> en la URL, ver _gate_login en
+-- app.py) vivía SOLO en memoria del proceso (un dict adentro de un
+-- @st.cache_resource): ni Tom podía ver qué sesiones había abiertas, ni
+-- cerrarle una a nadie — desactivar un usuario tampoco invalidaba el
+-- token que ya tuviera guardado en la URL, quedaba entrando igual hasta
+-- que expirara solo. Pasar esto a una tabla de verdad resuelve las 3
+-- cosas de una: listado, cierre manual, y que desactivar el usuario
+-- corte también sus sesiones ya abiertas (ver set_usuario_activo).
+CREATE TABLE IF NOT EXISTS sesiones (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    usuario_id INTEGER NOT NULL REFERENCES usuarios(id) ON DELETE CASCADE,
+    token TEXT UNIQUE NOT NULL,
+    creado_en TEXT DEFAULT (datetime('now','localtime')),
+    ultimo_visto TEXT DEFAULT (datetime('now','localtime')),
+    expira TEXT NOT NULL,
+    activa INTEGER DEFAULT 1
+);
+CREATE INDEX IF NOT EXISTS idx_sesiones_token ON sesiones(token);
+CREATE INDEX IF NOT EXISTS idx_sesiones_usuario ON sesiones(usuario_id);
 """
 
 # Valores por defecto de `settings`: se insertan una sola vez (INSERT OR
@@ -558,6 +579,111 @@ def list_usuarios():
 def set_usuario_activo(usuario_id, activo):
     conn = get_connection()
     conn.execute("UPDATE usuarios SET activo = ? WHERE id = ?", (int(activo), usuario_id))
+    if not activo:
+        # Sin esto, desactivar a alguien no lo saca de la app si ya tenía
+        # una sesión abierta (token de "recordarme" válido por 30 días,
+        # ver tabla sesiones más arriba): seguía entrando igual hasta que
+        # ese token expirara solo.
+        conn.execute("UPDATE sesiones SET activa=0 WHERE usuario_id=?", (usuario_id,))
+    conn.commit()
+    conn.close()
+
+
+SESION_DIAS_DURACION = 30
+
+
+def crear_sesion(usuario_id):
+    """Se llama al loguearse. Genera el token de 'recordarme 30 días' que
+    antes se guardaba solo en memoria (ver el comentario de la tabla
+    sesiones en SCHEMA) — ahora en la base, para poder listar/cerrar
+    sesiones desde Configuración."""
+    token = secrets.token_urlsafe(32)
+    expira = (datetime.now() + timedelta(days=SESION_DIAS_DURACION)).strftime("%Y-%m-%d %H:%M:%S")
+    conn = get_connection()
+    conn.execute(
+        "INSERT INTO sesiones (usuario_id, token, expira) VALUES (?, ?, ?)",
+        (usuario_id, token, expira),
+    )
+    conn.commit()
+    conn.close()
+    return token
+
+
+def validar_sesion(token):
+    """Devuelve el usuario ({'id','username','nombre'}, mismo shape que
+    verificar_login) si el token todavía sirve: existe, no fue cerrado a
+    mano (activa=0), no expiró, Y el usuario sigue activo — o None si
+    cualquiera de esas 4 cosas falló. No toca ultimo_visto (eso es
+    tocar_sesion, aparte, para no pagar 2 escrituras por chequeo)."""
+    conn = get_connection()
+    fila = conn.execute(
+        "SELECT sesiones.expira AS _expira, sesiones.activa AS _sesion_activa, "
+        "usuarios.id, usuarios.username, usuarios.nombre, usuarios.activo AS _usuario_activo "
+        "FROM sesiones JOIN usuarios ON usuarios.id = sesiones.usuario_id "
+        "WHERE sesiones.token = ?",
+        (token,),
+    ).fetchone()
+    conn.close()
+    if not fila:
+        return None
+    if not fila["_sesion_activa"] or not fila["_usuario_activo"]:
+        return None
+    if fila["_expira"] < datetime.now().strftime("%Y-%m-%d %H:%M:%S"):
+        return None
+    return {"id": fila["id"], "username": fila["username"], "nombre": fila["nombre"]}
+
+
+def tocar_sesion(token):
+    """Heartbeat: actualiza 'último visto' de esta sesión. Se llama cada
+    tanto desde app.py (no en cada rerun — ver _revalidar_sesion_si_corresponde),
+    así el listado de Configuración refleja quién está realmente usando la
+    app ahora mismo y no solo quién se logueó alguna vez en los últimos 30
+    días."""
+    conn = get_connection()
+    conn.execute("UPDATE sesiones SET ultimo_visto=datetime('now','localtime') WHERE token=?", (token,))
+    conn.commit()
+    conn.close()
+
+
+def list_sesiones_activas():
+    # Incluye el token (nunca se muestra en pantalla — ver _render_configuracion
+    # en app.py) solo para que la UI pueda distinguir "esta es tu propia
+    # sesión, la que estás usando ahora mismo" y avisar antes de cerrarla.
+    conn = get_connection()
+    rows = conn.execute(
+        "SELECT sesiones.id, sesiones.token, sesiones.creado_en, sesiones.ultimo_visto, "
+        "usuarios.id AS usuario_id, usuarios.nombre, usuarios.username "
+        "FROM sesiones JOIN usuarios ON usuarios.id = sesiones.usuario_id "
+        "WHERE sesiones.activa=1 AND sesiones.expira >= datetime('now','localtime') "
+        "ORDER BY sesiones.ultimo_visto DESC"
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def cerrar_sesion(sesion_id):
+    """Cierra UNA sesión puntual — botón 'Cerrar sesión' del listado de
+    Configuración. No es instantáneo del lado del navegador afectado:
+    Streamlit no empuja nada al cliente sin que el usuario interactúe, así
+    que recién surte efecto la próxima vez que esa sesión revalide (ver
+    _revalidar_sesion_si_corresponde en app.py, cada pocos minutos o al
+    hacer F5)."""
+    conn = get_connection()
+    conn.execute("UPDATE sesiones SET activa=0 WHERE id=?", (sesion_id,))
+    conn.commit()
+    conn.close()
+
+
+def cerrar_sesion_por_token(token):
+    """Logout del propio usuario (botón de la barra lateral): a diferencia
+    de antes, ahora también invalida el token en la base — si no, el
+    'Cerrar sesión' de uno mismo solo borraba el token local/de la URL,
+    pero la fila en sesiones seguía activa=1 y aparecía en el listado de
+    Configuración como si siguiera adentro."""
+    if not token:
+        return
+    conn = get_connection()
+    conn.execute("UPDATE sesiones SET activa=0 WHERE token=?", (token,))
     conn.commit()
     conn.close()
 
@@ -750,11 +876,23 @@ def _purgar_papelera(conn):
     )
 
 
+def _purgar_sesiones(conn):
+    """Mismo criterio que _purgar_papelera: sin cron server-side posible en
+    Streamlit Community Cloud, se limpia en cada arranque. Se borran las
+    cerradas (activa=0, ya sea por 'Cerrar sesión' manual, por el logout
+    del propio usuario, o por desactivar la cuenta) y las que ya expiraron
+    solas — no hace falta guardar nada de esto, a diferencia de la
+    papelera, porque acá no hay 'restaurar' una sesión vencida: el usuario
+    vuelve a loguearse y listo."""
+    conn.execute("DELETE FROM sesiones WHERE activa=0 OR expira < datetime('now','localtime')")
+
+
 def init_db():
     conn = get_connection()
     conn.executescript(SCHEMA)
     _migrar_columnas_faltantes(conn)
     _purgar_papelera(conn)
+    _purgar_sesiones(conn)
     for k, v in SETTINGS_DEFAULTS.items():
         conn.execute("INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)", (k, v))
     conn.commit()
