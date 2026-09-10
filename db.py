@@ -345,6 +345,21 @@ CREATE TABLE IF NOT EXISTS activity_log (
     texto TEXT
 );
 
+-- Bitácora de seguimiento de una importación (ficha de importación): mismo
+-- patrón que activity_log de un contacto CRM (texto libre + fecha/autor
+-- automáticos, un evento por fila) pero para importaciones. Reemplaza al
+-- viejo campo de texto libre notas_transito, que Tom mantenía a mano como
+-- si fuera un timeline (escribiendo él mismo la fecha de cada línea) —
+-- notas_transito se deja en la tabla importaciones sin tocar, como archivo
+-- de lo ya cargado, pero deja de editarse desde la ficha.
+CREATE TABLE IF NOT EXISTS importacion_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    importacion_id INTEGER NOT NULL REFERENCES importaciones(id) ON DELETE CASCADE,
+    fecha TEXT DEFAULT (datetime('now','localtime')),
+    autor TEXT,
+    texto TEXT
+);
+
 -- Parámetros generales editables desde la UI (Panel de Control >
 -- Configuración), para que ningún valor de estos quede fijo en el código.
 CREATE TABLE IF NOT EXISTS settings (
@@ -353,6 +368,7 @@ CREATE TABLE IF NOT EXISTS settings (
 );
 
 CREATE INDEX IF NOT EXISTS idx_activity_contact ON activity_log(contact_id);
+CREATE INDEX IF NOT EXISTS idx_importacion_log_importacion ON importacion_log(importacion_id);
 CREATE INDEX IF NOT EXISTS idx_cotizaciones_cliente ON cotizaciones(cliente_id);
 CREATE INDEX IF NOT EXISTS idx_importaciones_cliente ON importaciones(cliente_id);
 CREATE INDEX IF NOT EXISTS idx_cotizacion_productos_cot ON cotizacion_productos(cotizacion_id);
@@ -1096,6 +1112,37 @@ def update_importacion(imp_id, **campos):
     )
     conn.commit()
     conn.close()
+
+
+def add_importacion_nota(importacion_id, texto, autor="", fecha=None):
+    """Agrega un evento a la bitácora de seguimiento de una importación
+    (ver importacion_log en SCHEMA). fecha es opcional: se usa solo desde
+    la migración de notas_transito viejas (para conservar la fecha
+    original que Tom había escrito a mano); una nota nueva cargada desde
+    la ficha no la pasa y usa el DEFAULT (ahora mismo)."""
+    conn = get_connection()
+    if fecha:
+        conn.execute(
+            "INSERT INTO importacion_log (importacion_id, autor, texto, fecha) VALUES (?,?,?,?)",
+            (importacion_id, autor, texto, fecha),
+        )
+    else:
+        conn.execute(
+            "INSERT INTO importacion_log (importacion_id, autor, texto) VALUES (?,?,?)",
+            (importacion_id, autor, texto),
+        )
+    conn.commit()
+    conn.close()
+
+
+def list_importacion_notas(importacion_id):
+    conn = get_connection()
+    rows = conn.execute(
+        "SELECT * FROM importacion_log WHERE importacion_id=? ORDER BY fecha DESC, id DESC",
+        (importacion_id,),
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
 
 
 def delete_importacion(imp_id):

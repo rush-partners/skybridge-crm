@@ -2035,6 +2035,34 @@ def _render_detalle_final_importacion(imp, cotizacion):
     }
 
 
+def _render_timeline_importacion(imp_id):
+    """Bitácora de seguimiento de una importación — mismo patrón que el
+    '🕓 Timeline' de la ficha de contacto CRM (ver _agregar_nota_contacto):
+    texto libre + fecha/autor automáticos, cada nota guardada como su
+    propio evento (importacion_log) en vez de un solo bloque de texto que
+    había que mantener a mano escribiendo la fecha uno mismo (así era el
+    viejo campo 'notas_transito', reemplazado por esto)."""
+    autor = (st.session_state.get("usuario_autenticado") or {}).get("nombre", "")
+    with st.form(f"form_nota_imp_{imp_id}", clear_on_submit=True):
+        texto_nota = st.text_area("Nueva nota", key=f"notaimp_txt_{imp_id}")
+        if st.form_submit_button("➕ Agregar nota"):
+            if texto_nota.strip():
+                db.add_importacion_nota(imp_id, texto_nota.strip(), autor)
+                st.rerun()
+    notas = db.list_importacion_notas(imp_id)
+    if not notas:
+        st.caption("Sin notas de seguimiento todavía.")
+    for n in notas:
+        with st.container(border=True, key=f"notaimp_{n['id']}"):
+            autor_txt = f" · {html.escape(n['autor'])}" if n.get("autor") else ""
+            st.markdown(
+                f'<div style="font-size:12px; color:var(--sb-text-secondary);">'
+                f'{_fmt_fecha_hora(n["fecha"])}{autor_txt}</div>',
+                unsafe_allow_html=True,
+            )
+            st.markdown(html.escape(n["texto"] or "").replace("\n", "<br>"), unsafe_allow_html=True)
+
+
 def _render_contenido_importacion(imp, cotizaciones_cliente):
     """Ficha completa de una importación en 3 carpetas — mismo patrón de
     organización que Cotizaciones/Importaciones en la ficha de Clientes:
@@ -2087,7 +2115,9 @@ def _render_contenido_importacion(imp, cotizaciones_cliente):
         )
         etd = c9.date_input("ETD", value=_parse_fecha(imp.get("etd")), key=f"impetd_{imp['id']}", format="DD/MM/YYYY")
         eta = c10.date_input("ETA", value=_parse_fecha(imp.get("eta")), key=f"impeta_{imp['id']}", format="DD/MM/YYYY")
-        notas = st.text_area("Detalles a considerar (notas de tránsito)", value=imp.get("notas_transito") or "", key=f"impnt_{imp['id']}")
+
+        st.markdown("**Seguimiento**")
+        _render_timeline_importacion(imp["id"])
 
         st.markdown("**Fechas del proceso**")
         c11, c12, c13 = st.columns(3)
@@ -2107,7 +2137,6 @@ def _render_contenido_importacion(imp, cotizaciones_cliente):
                 proveedor_nombre=prov_nombre, proveedor_contacto=prov_contacto, proveedor_pais=prov_pais,
                 tipo_envio=tipo_envio, formato_envio=formato,
                 etd=etd.isoformat() if etd else None, eta=eta.isoformat() if eta else None,
-                notas_transito=notas,
                 fecha_llegada_puerto=fecha_llegada_puerto.isoformat() if fecha_llegada_puerto else None,
                 fecha_oficializacion=fecha_oficializacion.isoformat() if fecha_oficializacion else None,
                 fecha_entrega=fecha_entrega.isoformat() if fecha_entrega else None,
