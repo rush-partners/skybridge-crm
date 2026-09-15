@@ -3433,39 +3433,9 @@ def _generar_pdfs_cotizacion_editor(cab_full: dict, resultado: dict):
     return pdf_simple, pdf_completo
 
 
-def _resolver_cliente_id(cliente_id):
-    """Traduce el id "pseudo" de un contacto de CRM todavía sin cliente
-    vinculado (negativo, ver _render_cotizador_editor) al id real de un
-    cliente recién creado para él — así un prospecto que nunca se cotizó
-    antes puede elegirse directo en el desplegable del Cotizador, sin tener
-    que pasar primero por "Cotizar" desde su ficha del CRM. Se resuelve acá
-    (al GUARDAR), no al dibujar el desplegable, para no crear un cliente
-    nuevo en cada rerun del formulario con solo tenerlo seleccionado. Un
-    cliente_id ya real (positivo) o None se devuelve sin tocar."""
-    if cliente_id is None or cliente_id > 0:
-        return cliente_id
-    contacto = db.get_contact(-cliente_id)
-    if not contacto:
-        return None
-    if contacto.get("cliente_id"):
-        return contacto["cliente_id"]
-    return _crear_cliente_desde_contacto(contacto)
-
-
 def _render_cotizador_editor():
     clientes = db.list_clientes()
     mapa_clientes = {c["id"]: c["nombre"] for c in clientes}
-    # Contactos del CRM que todavía no tienen un cliente vinculado (nunca se
-    # cotizaron antes) — antes solo aparecían en este desplegable los que ya
-    # habían pasado por "Cotizar" alguna vez, así que un prospecto nuevo no
-    # se podía elegir acá hasta cotizarlo primero desde su ficha del CRM. Se
-    # identifican con un id negativo (-contact_id, nunca choca con un id real
-    # de `clientes`, que son siempre positivos); _resolver_cliente_id crea el
-    # cliente real recién al guardar la cotización, no antes.
-    for _ct in db.list_contacts():
-        if not _ct.get("cliente_id"):
-            _etiqueta = f" ({_ct['empresa']})" if _ct.get("empresa") else ""
-            mapa_clientes[-_ct["id"]] = f"{_ct['nombre']}{_etiqueta} — nuevo, sin cotizar"
 
     # El editor ya no elige QUÉ cotización abrir (eso se decide desde el
     # listado, con "➕ Nueva cotización" o "✏️ Editar" en una fila) — acá solo
@@ -4039,18 +4009,10 @@ def _render_cotizador_editor():
         _render_documentos_cotizacion(cot_id, cliente_id)
 
     def _guardar_cotizacion():
-        cliente_id_resuelto = _resolver_cliente_id(cliente_id)
-        if cliente_id_resuelto != cliente_id:
-            # El id "pseudo" (negativo) que tenía el selectbox deja de
-            # existir en las opciones apenas el contacto pasa a tener
-            # cliente_id propio (ver mapa_clientes en _render_cotizador_editor)
-            # — sin esto, el próximo rerun intenta dibujar el selectbox con
-            # un valor guardado que ya no está entre las opciones y rompe.
-            st.session_state[f"cliente_id_{cot_id}"] = cliente_id_resuelto
         db.save_cotizacion(
             cot_id,
             {
-                "cliente_id": cliente_id_resuelto, "detalle_pedido": detalle_pedido,
+                "cliente_id": cliente_id, "detalle_pedido": detalle_pedido,
                 "origen_cond_venta": origen, "contenedor": contenedor, "etd_eta": etd_eta,
                 "carrier": carrier, "freetime": freetime, "estado": estado,
                 "formato_envio": formato_envio,
@@ -4075,16 +4037,16 @@ def _render_cotizador_editor():
         # desde Clientes). _marcar_ganado_por_cliente asegura el vínculo
         # cliente↔contacto si todavía no existía, en vez de no-opear en
         # silencio (que era el comportamiento antes de esto).
-        if estado == "Aprobada" and cliente_id_resuelto:
-            contacto_vinculado = _marcar_ganado_por_cliente(cliente_id_resuelto)
+        if estado == "Aprobada" and cliente_id:
+            contacto_vinculado = _marcar_ganado_por_cliente(cliente_id)
             if contacto_vinculado:
                 mensaje += f" '{contacto_vinculado['nombre']}' pasó a Cliente."
         # Pedido de Tom: abrir/crear la cotización ya adelanta al contacto a
         # Cotizado/Calificado (ver _cotizar_cliente/_abrir_cotizacion_en_cotizador)
         # — mandarla de verdad ("Enviada") es un escalón más: pasa a
         # Negociación/"En negociación".
-        elif estado == "Enviada" and cliente_id_resuelto:
-            contacto_vinculado = _asegurar_contacto_para_cliente(cliente_id_resuelto)
+        elif estado == "Enviada" and cliente_id:
+            contacto_vinculado = _asegurar_contacto_para_cliente(cliente_id)
             if contacto_vinculado:
                 _avanzar_etapa_si_corresponde(
                     contacto_vinculado["id"], "Negociación", st.session_state.get("crm_autor", "")
@@ -5673,10 +5635,9 @@ def _agregar_nota_contacto(contact_id, texto, autor):
 def _crear_cliente_desde_contacto(contacto, notas=""):
     """Crea un cliente a partir de los datos de un contacto de CRM y lo
     vincula — única implementación de este traspaso, usada al cotizar
-    (_cotizar_contacto), al elegir en el Cotizador un contacto todavía sin
-    cliente (_resolver_cliente_id) y al cargar un contacto nuevo
-    (_render_carga_rapida_contacto), así las tres vías quedan
-    garantizadas 100% consistentes entre sí.
+    (_cotizar_contacto) y al cargar un contacto nuevo a mano
+    (_render_carga_rapida_contacto), así las dos vías quedan garantizadas
+    100% consistentes entre sí.
 
     Traspaso acordado: rubro/provincia/localidad del contacto pasan al
     cliente nuevo, para no terminar con dos fichas del mismo prospecto con
