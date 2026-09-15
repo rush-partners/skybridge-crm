@@ -5087,7 +5087,29 @@ def _actualizar_etapa_contacto(contact_id, key_selectbox):
 
 @st.dialog("Eliminar contacto")
 def _dialog_eliminar_contacto_crm(contact_id, nombre):
-    st.warning(f"¿Confirmás eliminar a **{nombre}**? Queda en la Papelera de reciclaje por 30 días antes de irse para siempre.")
+    # Contacto y cliente son la misma relación comercial vista desde 2
+    # pantallas, pero son filas independientes (ver update_contact/
+    # update_cliente en db.py): borrar el contacto NO borra el cliente
+    # vinculado, que sigue existiendo con su historia real de cotizaciones/
+    # importaciones. Antes esto no se avisaba en ningún lado, así que un
+    # cliente "eliminado" desde el CRM en realidad seguía apareciendo en
+    # Clientes y en el desplegable del Cotizador sin explicación.
+    contacto = db.get_contact(contact_id)
+    cliente_id = contacto.get("cliente_id") if contacto else None
+    cliente = db.get_cliente(cliente_id) if cliente_id else None
+    if cliente:
+        n_cot = len(db.list_cotizaciones(cliente_id=cliente_id))
+        n_imp = len(db.list_importaciones(cliente_id))
+        st.warning(
+            f"¿Confirmás eliminar a **{nombre}**? Queda en la Papelera de reciclaje por 30 días "
+            "antes de irse para siempre.\n\n"
+            f"Este contacto está vinculado al cliente **'{cliente['nombre']}'** "
+            f"({n_cot} cotización(es), {n_imp} importación(es)). Eliminar el contacto **no elimina "
+            "ese cliente**: va a seguir apareciendo en 'Clientes' y en el desplegable del Cotizador. "
+            "Si también querés borrarlo, hacelo aparte desde su ficha en 'Clientes'."
+        )
+    else:
+        st.warning(f"¿Confirmás eliminar a **{nombre}**? Queda en la Papelera de reciclaje por 30 días antes de irse para siempre.")
     c1, c2 = st.columns(2)
     if c1.button("Cancelar", use_container_width=True, key=f"crmcancelardel_{contact_id}"):
         st.rerun()
@@ -5098,6 +5120,11 @@ def _dialog_eliminar_contacto_crm(contact_id, nombre):
             st.session_state.contacto_seleccionado = None
         _flash(f"Contacto '{nombre}' eliminado.", icon="🗑️")
         st.rerun()
+    if cliente:
+        if st.button(f"Ver ficha de '{cliente['nombre']}' en Clientes →", key=f"crmverclidel_{contact_id}", use_container_width=True):
+            st.session_state.cliente_seleccionado = cliente_id
+            st.session_state.pagina_nav = "📋 Clientes"
+            st.rerun()
 
 
 def _render_fila_contacto_crm(c, en_curso_por_cliente=None, resumen_cot_pipeline=None, tipos_por_contacto=None):
@@ -5755,11 +5782,11 @@ def _render_ficha_contacto(c):
                         st.success("Actualizado.")
                         st.rerun()
                 if b2.form_submit_button("🗑️ Eliminar contacto", key=f"btndelcontacto_{c['id']}"):
-                    autor = (st.session_state.get("usuario_autenticado") or {}).get("nombre", "")
-                    db.delete_contact(c["id"], autor)
-                    st.session_state.contacto_seleccionado = None
-                    st.warning("Contacto eliminado.")
-                    st.rerun()
+                    # Mismo diálogo de confirmación que el ícono 🗑️ del kanban
+                    # (_dialog_eliminar_contacto_crm) — antes este botón borraba
+                    # directo, sin avisar ni de la Papelera ni de que un cliente
+                    # vinculado con cotizaciones/importaciones sigue existiendo.
+                    _dialog_eliminar_contacto_crm(c["id"], c["nombre"])
 
         st.divider()
         st.markdown("#### 🕓 Timeline")

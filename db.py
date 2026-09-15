@@ -17,6 +17,7 @@ from urllib.parse import urlsplit
 from datetime import datetime, timedelta
 
 import bcrypt
+import crm
 import streamlit as st
 import turso_serverless
 from turso_serverless.session import ProtocolError
@@ -1118,6 +1119,21 @@ def update_cliente(cliente_id, nombre, cuit="", email="", telefono="", direccion
            rubro=?, productos_interes=?, notas=? WHERE id=?""",
         (nombre, cuit, email, telefono, direccion, rubro, productos_interes, notas, cliente_id),
     )
+    # Cliente y contacto de CRM son la misma relación comercial vista desde 2
+    # pantallas (ver _asegurar_contacto_para_cliente/_cotizar_contacto en
+    # app.py): si este cliente tiene un contacto vinculado, sus datos
+    # identificatorios tienen que quedar iguales en las dos tablas — si no,
+    # la ficha de ese contacto en el CRM sigue mostrando los datos de antes
+    # de editar desde Clientes. whatsapp se normaliza acá porque este
+    # `telefono` llega tal cual lo tipeó el usuario en Clientes (sin pasar
+    # por crm.normalizar_whatsapp, a diferencia del que ya se guarda en
+    # contacts), y el botón de WhatsApp del CRM depende de ese formato.
+    contacto = conn.execute("SELECT id FROM contacts WHERE cliente_id=?", (cliente_id,)).fetchone()
+    if contacto:
+        conn.execute(
+            "UPDATE contacts SET nombre=?, email=?, whatsapp=?, rubro=? WHERE id=?",
+            (nombre, email, crm.normalizar_whatsapp(telefono), rubro, contacto["id"]),
+        )
     conn.commit()
     conn.close()
 
@@ -1878,6 +1894,7 @@ def update_contact(contact_id, nombre, empresa="", email="", whatsapp="", origen
     # que además deja registro en activity_log — así el timeline nunca queda
     # desincronizado de la etapa actual del contacto.
     conn = get_connection()
+    fila = conn.execute("SELECT cliente_id FROM contacts WHERE id=?", (contact_id,)).fetchone()
     conn.execute(
         """UPDATE contacts SET nombre=?, empresa=?, cuit=?, email=?, whatsapp=?, origen=?,
            asignado_a=?, proximo_seguimiento=?, provincia=?, localidad=?, rubro=?, cargo_contacto=?,
@@ -1886,6 +1903,18 @@ def update_contact(contact_id, nombre, empresa="", email="", whatsapp="", origen
         (nombre, empresa, cuit, email, whatsapp, origen, asignado_a, proximo_seguimiento,
          provincia, localidad, rubro, cargo_contacto, producto_interes, contact_id),
     )
+    # Mismo criterio que update_cliente (ver ahí): si este contacto ya tiene
+    # un cliente vinculado, sus datos identificatorios tienen que quedar
+    # iguales en las dos tablas — si no, el desplegable de Cliente en el
+    # Cotizador (y cualquier otro lugar que lea `clientes`) sigue mostrando
+    # los datos de antes de editar desde el CRM. `whatsapp` ya llega
+    # normalizado (todos los llamadores de update_contact lo pasan por
+    # crm.normalizar_whatsapp antes), así que sirve tal cual para `telefono`.
+    if fila and fila["cliente_id"]:
+        conn.execute(
+            "UPDATE clientes SET nombre=?, email=?, telefono=?, rubro=? WHERE id=?",
+            (nombre, email, whatsapp, rubro, fila["cliente_id"]),
+        )
     conn.commit()
     conn.close()
 
