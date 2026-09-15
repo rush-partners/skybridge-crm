@@ -1128,8 +1128,21 @@ def update_cliente(cliente_id, nombre, cuit="", email="", telefono="", direccion
     # `telefono` llega tal cual lo tipeó el usuario en Clientes (sin pasar
     # por crm.normalizar_whatsapp, a diferencia del que ya se guarda en
     # contacts), y el botón de WhatsApp del CRM depende de ese formato.
-    contacto = conn.execute("SELECT id FROM contacts WHERE cliente_id=?", (cliente_id,)).fetchone()
-    if contacto:
+    # Mismo criterio de nombre que update_contact (ver ahí, la dirección
+    # inversa): si el contacto vinculado tiene empresa cargada, el nombre
+    # del cliente refleja esa empresa, no a la persona — actualizar acá
+    # contacts.nombre lo pisaría con el nombre de la empresa y se perdería
+    # quién es la persona de contacto (ej. "OESTE DESING" no puede
+    # convertirse en el nombre de Jonathan Navarre). Se sincroniza a
+    # `empresa` en ese caso, a `nombre` si el contacto es una persona sin
+    # empresa propia (mismo valor que el cliente, igual que antes).
+    contacto = conn.execute("SELECT id, empresa FROM contacts WHERE cliente_id=?", (cliente_id,)).fetchone()
+    if contacto and contacto["empresa"]:
+        conn.execute(
+            "UPDATE contacts SET empresa=?, email=?, whatsapp=?, rubro=? WHERE id=?",
+            (nombre, email, crm.normalizar_whatsapp(telefono), rubro, contacto["id"]),
+        )
+    elif contacto:
         conn.execute(
             "UPDATE contacts SET nombre=?, email=?, whatsapp=?, rubro=? WHERE id=?",
             (nombre, email, crm.normalizar_whatsapp(telefono), rubro, contacto["id"]),
@@ -1910,10 +1923,18 @@ def update_contact(contact_id, nombre, empresa="", email="", whatsapp="", origen
     # los datos de antes de editar desde el CRM. `whatsapp` ya llega
     # normalizado (todos los llamadores de update_contact lo pasan por
     # crm.normalizar_whatsapp antes), así que sirve tal cual para `telefono`.
+    # El nombre del cliente sigue la MISMA regla que al crearlo (ver
+    # create_cliente vía _crear_cliente_desde_contacto en app.py): empresa
+    # manda si está cargada (el cliente ES la empresa, el contacto es la
+    # persona ahí — ej. "OESTE DESING"/Jonathan Navarre); si no, el nombre
+    # de la persona. Sin este criterio acá, borrar o cambiar la empresa de
+    # un contacto vinculado dejaba el nombre del cliente pisado con el de
+    # la empresa vieja para siempre (solo se sincronizaba `nombre`, nunca
+    # se reevaluaba `empresa`).
     if fila and fila["cliente_id"]:
         conn.execute(
             "UPDATE clientes SET nombre=?, email=?, telefono=?, rubro=? WHERE id=?",
-            (nombre, email, whatsapp, rubro, fila["cliente_id"]),
+            (empresa or nombre, email, whatsapp, rubro, fila["cliente_id"]),
         )
     conn.commit()
     conn.close()

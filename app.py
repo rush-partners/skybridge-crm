@@ -3449,14 +3449,7 @@ def _resolver_cliente_id(cliente_id):
         return None
     if contacto.get("cliente_id"):
         return contacto["cliente_id"]
-    nuevo_id = db.create_cliente(
-        nombre=contacto.get("empresa") or contacto["nombre"],
-        email=contacto.get("email") or "",
-        telefono=contacto.get("whatsapp") or "",
-        rubro=contacto.get("rubro") or "",
-    )
-    db.link_contact_cliente(contacto["id"], nuevo_id)
-    return nuevo_id
+    return _crear_cliente_desde_contacto(contacto)
 
 
 def _render_cotizador_editor():
@@ -5086,10 +5079,29 @@ def _render_carga_rapida_contacto():
                 elif not crm.whatsapp_valido(telefono_rapido):
                     st.error("Ese teléfono/WhatsApp no parece válido (revisá la cantidad de dígitos).")
                 else:
-                    db.create_contact(
+                    whatsapp_norm = crm.normalizar_whatsapp(telefono_rapido)
+                    nuevo_contacto_id = db.create_contact(
                         nombre_rapido.strip(), "",
-                        email_norm, crm.normalizar_whatsapp(telefono_rapido),
+                        email_norm, whatsapp_norm,
                         "Manual", crm.STAGE_INICIAL, "", None, cuit_rapido.strip(),
+                    )
+                    # Pedido explícito: un contacto cargado a mano en el CRM
+                    # tiene que estar disponible de entrada en 'Clientes' y
+                    # en el desplegable del Cotizador, no recién la primera
+                    # vez que se cotiza — mismo traspaso que usa "Cotizar"
+                    # (_crear_cliente_desde_contacto), solo que acá corre en
+                    # el momento del alta. La importación masiva de
+                    # contactos (Excel/CSV) NO hace esto: ahí sí tiene
+                    # sentido separar prospectos sin calificar de clientes
+                    # reales, para no ensuciar 'Clientes' con decenas de
+                    # leads fríos de una sola carga.
+                    _crear_cliente_desde_contacto(
+                        {
+                            "id": nuevo_contacto_id, "nombre": nombre_rapido.strip(), "empresa": "",
+                            "email": email_norm, "whatsapp": whatsapp_norm, "rubro": "",
+                            "provincia": "", "localidad": "",
+                        },
+                        notas="Cliente creado automáticamente al cargar el contacto desde el CRM.",
                     )
                     _flash(f"Contacto '{nombre_rapido}' agregado.")
                     st.rerun()
@@ -5658,6 +5670,37 @@ def _agregar_nota_contacto(contact_id, texto, autor):
     db.add_activity(contact_id, "nota", texto, autor)
 
 
+def _crear_cliente_desde_contacto(contacto, notas=""):
+    """Crea un cliente a partir de los datos de un contacto de CRM y lo
+    vincula — única implementación de este traspaso, usada al cotizar
+    (_cotizar_contacto), al elegir en el Cotizador un contacto todavía sin
+    cliente (_resolver_cliente_id) y al cargar un contacto nuevo
+    (_render_carga_rapida_contacto), así las tres vías quedan
+    garantizadas 100% consistentes entre sí.
+
+    Traspaso acordado: rubro/provincia/localidad del contacto pasan al
+    cliente nuevo, para no terminar con dos fichas del mismo prospecto con
+    datos distintos. Clientes no tiene provincia/localidad como columnas
+    propias (solo "dirección" libre), así que se combinan en una sola
+    línea ahí. El nombre sigue la misma regla que db.update_contact/
+    update_cliente usan para mantenerlos sincronizados después: empresa
+    manda si está cargada (el cliente ES la empresa), si no el nombre de
+    la persona."""
+    provincia = contacto.get("provincia") or ""
+    localidad = contacto.get("localidad") or ""
+    direccion = ", ".join(p for p in (localidad, provincia) if p)
+    nuevo_id = db.create_cliente(
+        nombre=contacto.get("empresa") or contacto["nombre"],
+        email=contacto.get("email") or "",
+        telefono=contacto.get("whatsapp") or "",
+        direccion=direccion,
+        rubro=contacto.get("rubro") or "",
+        notas=notas,
+    )
+    db.link_contact_cliente(contacto["id"], nuevo_id)
+    return nuevo_id
+
+
 def _cotizar_contacto(contact_id):
     """Callback del botón '➕ Cotizar' en la ficha de un contacto del CRM.
     Si el contacto todavía no está vinculado a un cliente del módulo
@@ -5669,23 +5712,9 @@ def _cotizar_contacto(contact_id):
     contacto = db.get_contact(contact_id)
     cliente_id = contacto.get("cliente_id")
     if not cliente_id:
-        # Traspaso acordado: rubro/provincia/localidad del contacto CRM
-        # pasan al Cliente nuevo, para no terminar con dos fichas del mismo
-        # prospecto con datos distintos. Clientes no tiene provincia/
-        # localidad como columnas propias (solo "dirección" libre), así que
-        # se combinan en una sola línea ahí.
-        provincia = contacto.get("provincia") or ""
-        localidad = contacto.get("localidad") or ""
-        direccion = ", ".join(p for p in (localidad, provincia) if p)
-        cliente_id = db.create_cliente(
-            nombre=contacto.get("empresa") or contacto["nombre"],
-            email=contacto.get("email") or "",
-            telefono=contacto.get("whatsapp") or "",
-            direccion=direccion,
-            rubro=contacto.get("rubro") or "",
-            notas=f"Cliente creado automáticamente desde el contacto CRM '{contacto['nombre']}'.",
+        cliente_id = _crear_cliente_desde_contacto(
+            contacto, notas=f"Cliente creado automáticamente desde el contacto CRM '{contacto['nombre']}'.",
         )
-        db.link_contact_cliente(contact_id, cliente_id)
     _cotizar_cliente(cliente_id)
 
 
